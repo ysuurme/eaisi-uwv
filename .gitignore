@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Workspace
+eaisi-uwv.code-workspace

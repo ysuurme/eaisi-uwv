@@ -1,0 +1,212 @@
+[
+  {
+    "Key": "10000",
+    "Title": "Total personal characteristics",
+    "Description": "A person with an employment contract for   a fixed number of hours and for an indefinite period.",
+    "CategoryGroupID": 1
+  },
+  {
+    "Key": "14   ",
+    "Title": "Employment status: permanent contract",
+    "Description": "A person with an employment contract for   a fixed number of hours and for an indefinite period.",
+    "CategoryGroupID": 2
+  },
+  {
+    "Key": "15   ",
+    "Title": "Employment status: flexible contract",
+    "Description": "A person with an employment contract for a limited period and not for a fixed number of hours.",
+    "CategoryGroupID": 2
+  },
+  {
+    "Key": "21380",
+    "Title": "Employment status: self-employed",
+    "Description": "A person whose main occupation is performing labour in his/her own enterprise/practice or in enterprise/practice of a relative, or as an independent professional.",
+    "CategoryGroupID": 2
+  },
+  {
+    "Key": "1    ",
+    "Title": "Gross monthly income 0 to 501 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "2    ",
+    "Title": "Gross monthly income 501 to 1001 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "3    ",
+    "Title": "Gross monthly income 1001 to 1501 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "4    ",
+    "Title": "Gross monthly income 1501 to 2001 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "5    ",
+    "Title": "Gross monthly income 2001 to 2501 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "6    ",
+    "Title": "Gross monthly income 2501 to 3001 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "7    ",
+    "Title": "Gross monthly income 3001 to 3501 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "8    ",
+    "Title": "Gross monthly income 3501 to 4001 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "9    ",
+    "Title": "Gross monthly income 4001 to 4501 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "10   ",
+    "Title": "Gross monthly income 4501 to 5001 dollar",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "11   ",
+    "Title": "Gross monthly inc. 5001 to 10001 dollar",
+    "Description": "",
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "12   ",
+    "Title": "Gross monthly inc. 10001 dollar or more",
+    "Description": "",
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "13   ",
+    "Title": "Gross monthly income unknown",
+    "Description": null,
+    "CategoryGroupID": 6
+  },
+  {
+    "Key": "21210",
+    "Title": "Working hours: 1 to 12 hours a week",
+    "Description": "The number of hours that a person works in a normal or average working week is between 1 and 12 hours.",
+    "CategoryGroupID": 3
+  },
+  {
+    "Key": "21220",
+    "Title": "Working hours: 12 to 20 hours a week",
+    "Description": "The number of hours that a person works in a normal or average working week is between 12 and 20 hours.",
+    "CategoryGroupID": 3
+  },
+  {
+    "Key": "21230",
+    "Title": "Working hours: 20 to 35 hours a week",
+    "Description": "The number of hours that a person works in a normal or average working week is between 20 and 35 hours.",
+    "CategoryGroupID": 3
+  },
+  {
+    "Key": "21240",
+    "Title": "Working hours: 35 hours or more",
+    "Description": "The number of hours that a person works in a normal or average working week is 35 hours or more.",
+    "CategoryGroupID": 3
+  },
+  {
+    "Key": "16   ",
+    "Title": "Military",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "17   ",
+    "Title": "Legislators, senior officials, managers",
+    "Description": "Members of parliament, members of the national government, executives.",
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "18   ",
+    "Title": "Scientists, scholars",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "19   ",
+    "Title": "Technicians, skilled workers",
+    "Description": "Technicians at various levels, skilled workers.",
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "20   ",
+    "Title": "Office workers",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "21   ",
+    "Title": "Service, shop and market sales workers",
+    "Description": "Lower service and commercial personnel.",
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "22   ",
+    "Title": "Skilled workers agriculture and fishery",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "23   ",
+    "Title": "Craftsmen",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "24   ",
+    "Title": "Factory workers, machine operators, etc.",
+    "Description": "Lower service and commercial personnel.",
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "25   ",
+    "Title": "Elementary occupations",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "26   ",
+    "Title": "Not classifiable",
+    "Description": null,
+    "CategoryGroupID": 4
+  },
+  {
+    "Key": "27   ",
+    "Title": "Has one job",
+    "Description": null,
+    "CategoryGroupID": 5
+  },
+  {
+    "Key": "28   ",
+    "Title": "Has more than one job",
+    "Description": null,
+    "CategoryGroupID": 5
+  },
+  {
+    "Key": "29   ",
+    "Title": "Presence of multiple jobs: unknown",
+    "Description": null,
+    "CategoryGroupID": 5
+  }
+]

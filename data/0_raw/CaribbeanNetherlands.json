@@ -1,0 +1,20 @@
+[
+  {
+    "Key": "GM9001",
+    "Title": "Bonaire",
+    "Description": "Bonaire has had the status of a \"special municipality\" of the Netherlands since 10 October 2010. On the grounds of this new status as a \"special municipality\", Bonaire is officially recognised as a public body of the Netherlands.",
+    "CategoryGroupID": null
+  },
+  {
+    "Key": "GM9002",
+    "Title": "St. Eustatius",
+    "Description": "St. Eustatius has had the status of a \"special municipality\" of the Netherlands since 10 October 2010. On the grounds of this new status as a \"special municipality\", St. Eustatius is officially recognised as a public body of the Netherlands.",
+    "CategoryGroupID": null
+  },
+  {
+    "Key": "GM9003",
+    "Title": "Saba",
+    "Description": "Saba has had the status of a \"special municipality\" of the Netherlands since 10 October 2010. On the grounds of this new status as a \"special municipality\", Saba is officially recognised as a public body of the Netherlands.",
+    "CategoryGroupID": null
+  }
+]
