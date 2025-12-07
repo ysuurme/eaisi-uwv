@@ -7,11 +7,10 @@
 - [Project Contributions](#project-contributions)
 - [GitHub Flow](#github-flow)
 - [Project Management](#project-management)
-- [Contributing](#contributing)
 
 ## Getting Started
 
-This project is built using CPython 3.10.11 and managed with UV. We use GitHub as our central hub for code management and project coordination.
+This project is built using CPython 3.10.11 and dependencies are managed with UV. We use GitHub as our central hub for code management and project coordination.
 
 References:
 - Python installation and dependency management via UV: https://docs.astral.sh/uv/
@@ -95,10 +94,10 @@ We use **GitHub Projects** to organize our work, track progress, and plan issues
 ### Getting Started with Issues
 
 1. Check the current **GitHub Project** board for available issues
-2. Find a task in the `Backlog` that interests you
+2. Find a task in the `Todo` that interests you
 3. Assign yourself to the issue
-4. Move it to `In Progress` when you start working
-5. Create a PR linked to the issue
-6. Move to `In Review` when the pull request is ready
-7. Move to `Done` after the Pull Request is merged to main
+4. Move it to `In Progress` when you have created a branch and start working
+5. Create a Pull Request linked to the issue to track updates
+6. Move to `In Review` when the Pull Request is ready
+7. Move to `Done` after the Pull Request branch is merged to main
 
