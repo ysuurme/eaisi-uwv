@@ -13,10 +13,10 @@
 This project is built using CPython 3.10.11 and dependencies are managed with UV. We use GitHub as our central hub for code management and project coordination.
 
 References:
-- Python installation and dependency management via UV: https://docs.astral.sh/uv/
-- Project code management via Github: https://docs.github.com/
-- Project repository: https://github.com/ysuurme/eaisi-uwv
-- Project contributions: https://docs.github.com/en/get-started/using-github/github-flow
+- UV CPython installation and dependency management: https://docs.astral.sh/uv/
+- Github docs: https://docs.github.com/
+- Project Structure: https://github.com/ysuurme/eaisi-uwv
+- Project Contributions: https://docs.github.com/en/get-started/using-github/github-flow
 
 ## Project Structure
 
@@ -83,7 +83,7 @@ Our development process follows the GitHub Flow model for a smooth and collabora
 
 ## Project Management
 
-We use **GitHub Projects** to organize our work, track progress, and plan issues.
+We use a **GitHub Project** @project-eaisi-uwv to organize our work, track progress, and plan issues.
 
 ### How We Use GitHub Projects
 
