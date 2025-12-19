@@ -1,0 +1,2837 @@
+[
+  {
+    "ID": 0,
+    "Gender": "1100",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 8837,
+    "EmployedLabourForceNationalDef_2": 8559
+  },
+  {
+    "ID": 1,
+    "Gender": "1100",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 2099,
+    "EmployedLabourForceNationalDef_2": 1940
+  },
+  {
+    "ID": 2,
+    "Gender": "1100",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1045,
+    "EmployedLabourForceNationalDef_2": 971
+  },
+  {
+    "ID": 3,
+    "Gender": "1100",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 6344,
+    "EmployedLabourForceNationalDef_2": 6241
+  },
+  {
+    "ID": 4,
+    "Gender": "1100",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1443,
+    "EmployedLabourForceNationalDef_2": 1362
+  },
+  {
+    "ID": 5,
+    "Gender": "1100",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 717,
+    "EmployedLabourForceNationalDef_2": 699
+  },
+  {
+    "ID": 6,
+    "Gender": "1100",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1401,
+    "EmployedLabourForceNationalDef_2": 1392
+  },
+  {
+    "ID": 7,
+    "Gender": "1100",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 320,
+    "EmployedLabourForceNationalDef_2": 302
+  },
+  {
+    "ID": 8,
+    "Gender": "1100",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 179,
+    "EmployedLabourForceNationalDef_2": 150
+  },
+  {
+    "ID": 9,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1092,
+    "EmployedLabourForceNationalDef_2": 926
+  },
+  {
+    "ID": 10,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 335,
+    "EmployedLabourForceNationalDef_2": 276
+  },
+  {
+    "ID": 11,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 148,
+    "EmployedLabourForceNationalDef_2": 123
+  },
+  {
+    "ID": 12,
+    "Gender": "1100",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 325,
+    "EmployedLabourForceNationalDef_2": 295
+  },
+  {
+    "ID": 13,
+    "Gender": "1100",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 89,
+    "EmployedLabourForceNationalDef_2": 54
+  },
+  {
+    "ID": 14,
+    "Gender": "1100",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 38,
+    "EmployedLabourForceNationalDef_2": 26
+  },
+  {
+    "ID": 15,
+    "Gender": "1100",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1483,
+    "EmployedLabourForceNationalDef_2": 1483
+  },
+  {
+    "ID": 16,
+    "Gender": "1100",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 383,
+    "EmployedLabourForceNationalDef_2": 357
+  },
+  {
+    "ID": 17,
+    "Gender": "1100",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 154,
+    "EmployedLabourForceNationalDef_2": 146
+  },
+  {
+    "ID": 18,
+    "Gender": "1100",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 2222,
+    "EmployedLabourForceNationalDef_2": 2181
+  },
+  {
+    "ID": 19,
+    "Gender": "1100",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 410,
+    "EmployedLabourForceNationalDef_2": 381
+  },
+  {
+    "ID": 20,
+    "Gender": "1100",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 275,
+    "EmployedLabourForceNationalDef_2": 260
+  },
+  {
+    "ID": 21,
+    "Gender": "1100",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1407,
+    "EmployedLabourForceNationalDef_2": 1344
+  },
+  {
+    "ID": 22,
+    "Gender": "1100",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 343,
+    "EmployedLabourForceNationalDef_2": 325
+  },
+  {
+    "ID": 23,
+    "Gender": "1100",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 164,
+    "EmployedLabourForceNationalDef_2": 162
+  },
+  {
+    "ID": 24,
+    "Gender": "1100",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 938,
+    "EmployedLabourForceNationalDef_2": 914
+  },
+  {
+    "ID": 25,
+    "Gender": "1100",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 223,
+    "EmployedLabourForceNationalDef_2": 215
+  },
+  {
+    "ID": 26,
+    "Gender": "1100",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 97,
+    "EmployedLabourForceNationalDef_2": 92
+  },
+  {
+    "ID": 27,
+    "Gender": "1100",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 688,
+    "EmployedLabourForceNationalDef_2": 676
+  },
+  {
+    "ID": 28,
+    "Gender": "1100",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 142,
+    "EmployedLabourForceNationalDef_2": 142
+  },
+  {
+    "ID": 29,
+    "Gender": "1100",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 61,
+    "EmployedLabourForceNationalDef_2": 57
+  },
+  {
+    "ID": 30,
+    "Gender": "1100",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 347,
+    "EmployedLabourForceNationalDef_2": 339
+  },
+  {
+    "ID": 31,
+    "Gender": "1100",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 84,
+    "EmployedLabourForceNationalDef_2": 84
+  },
+  {
+    "ID": 32,
+    "Gender": "1100",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 46,
+    "EmployedLabourForceNationalDef_2": 46
+  },
+  {
+    "ID": 33,
+    "Gender": "1100",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 266,
+    "EmployedLabourForceNationalDef_2": 266
+  },
+  {
+    "ID": 34,
+    "Gender": "1100",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 42,
+    "EmployedLabourForceNationalDef_2": 42
+  },
+  {
+    "ID": 35,
+    "Gender": "1100",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 15,
+    "EmployedLabourForceNationalDef_2": 15
+  },
+  {
+    "ID": 36,
+    "Gender": "1100",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 143,
+    "EmployedLabourForceNationalDef_2": 134
+  },
+  {
+    "ID": 37,
+    "Gender": "1100",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 47,
+    "EmployedLabourForceNationalDef_2": 43
+  },
+  {
+    "ID": 38,
+    "Gender": "1100",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 39,
+    "Gender": "1100",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 102,
+    "EmployedLabourForceNationalDef_2": 102
+  },
+  {
+    "ID": 40,
+    "Gender": "1100",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 53,
+    "EmployedLabourForceNationalDef_2": 53
+  },
+  {
+    "ID": 41,
+    "Gender": "1100",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 42,
+    "Gender": "1100",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 281,
+    "EmployedLabourForceNationalDef_2": 249
+  },
+  {
+    "ID": 43,
+    "Gender": "1100",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 91,
+    "EmployedLabourForceNationalDef_2": 91
+  },
+  {
+    "ID": 44,
+    "Gender": "1100",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 31,
+    "EmployedLabourForceNationalDef_2": 22
+  },
+  {
+    "ID": 45,
+    "Gender": "1100",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 38,
+    "EmployedLabourForceNationalDef_2": 28
+  },
+  {
+    "ID": 46,
+    "Gender": "1100",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 47,
+    "Gender": "1100",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 48,
+    "Gender": "1100",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 596,
+    "EmployedLabourForceNationalDef_2": 548
+  },
+  {
+    "ID": 49,
+    "Gender": "1100",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 178,
+    "EmployedLabourForceNationalDef_2": 146
+  },
+  {
+    "ID": 50,
+    "Gender": "1100",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 145,
+    "EmployedLabourForceNationalDef_2": 127
+  },
+  {
+    "ID": 51,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 104,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 52,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 123,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 53,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 39,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 54,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 189,
+    "EmployedLabourForceNationalDef_2": 180
+  },
+  {
+    "ID": 55,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 31,
+    "EmployedLabourForceNationalDef_2": 27
+  },
+  {
+    "ID": 56,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 27,
+    "EmployedLabourForceNationalDef_2": 24
+  },
+  {
+    "ID": 57,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 981,
+    "EmployedLabourForceNationalDef_2": 918
+  },
+  {
+    "ID": 58,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 338,
+    "EmployedLabourForceNationalDef_2": 338
+  },
+  {
+    "ID": 59,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 150,
+    "EmployedLabourForceNationalDef_2": 144
+  },
+  {
+    "ID": 60,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 7563,
+    "EmployedLabourForceNationalDef_2": 7461
+  },
+  {
+    "ID": 61,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1607,
+    "EmployedLabourForceNationalDef_2": 1575
+  },
+  {
+    "ID": 62,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 829,
+    "EmployedLabourForceNationalDef_2": 803
+  },
+  {
+    "ID": 63,
+    "Gender": "1100",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 64,
+    "Gender": "1100",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 65,
+    "Gender": "1100",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 66,
+    "Gender": "1100",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 705,
+    "EmployedLabourForceNationalDef_2": 697
+  },
+  {
+    "ID": 67,
+    "Gender": "1100",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 236,
+    "EmployedLabourForceNationalDef_2": 219
+  },
+  {
+    "ID": 68,
+    "Gender": "1100",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 73,
+    "EmployedLabourForceNationalDef_2": 73
+  },
+  {
+    "ID": 69,
+    "Gender": "1100",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 896,
+    "EmployedLabourForceNationalDef_2": 861
+  },
+  {
+    "ID": 70,
+    "Gender": "1100",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 212,
+    "EmployedLabourForceNationalDef_2": 212
+  },
+  {
+    "ID": 71,
+    "Gender": "1100",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 147,
+    "EmployedLabourForceNationalDef_2": 127
+  },
+  {
+    "ID": 72,
+    "Gender": "1100",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1583,
+    "EmployedLabourForceNationalDef_2": 1516
+  },
+  {
+    "ID": 73,
+    "Gender": "1100",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 302,
+    "EmployedLabourForceNationalDef_2": 298
+  },
+  {
+    "ID": 74,
+    "Gender": "1100",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 177,
+    "EmployedLabourForceNationalDef_2": 177
+  },
+  {
+    "ID": 75,
+    "Gender": "1100",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 733,
+    "EmployedLabourForceNationalDef_2": 733
+  },
+  {
+    "ID": 76,
+    "Gender": "1100",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 144,
+    "EmployedLabourForceNationalDef_2": 132
+  },
+  {
+    "ID": 77,
+    "Gender": "1100",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 119,
+    "EmployedLabourForceNationalDef_2": 119
+  },
+  {
+    "ID": 78,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1978,
+    "EmployedLabourForceNationalDef_2": 1894
+  },
+  {
+    "ID": 79,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 328,
+    "EmployedLabourForceNationalDef_2": 315
+  },
+  {
+    "ID": 80,
+    "Gender": "1100",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 164,
+    "EmployedLabourForceNationalDef_2": 153
+  },
+  {
+    "ID": 81,
+    "Gender": "1100",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 62,
+    "EmployedLabourForceNationalDef_2": 62
+  },
+  {
+    "ID": 82,
+    "Gender": "1100",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 28,
+    "EmployedLabourForceNationalDef_2": 22
+  },
+  {
+    "ID": 83,
+    "Gender": "1100",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 31,
+    "EmployedLabourForceNationalDef_2": 24
+  },
+  {
+    "ID": 84,
+    "Gender": "1100",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1574,
+    "EmployedLabourForceNationalDef_2": 1528
+  },
+  {
+    "ID": 85,
+    "Gender": "1100",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 415,
+    "EmployedLabourForceNationalDef_2": 373
+  },
+  {
+    "ID": 86,
+    "Gender": "1100",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 164,
+    "EmployedLabourForceNationalDef_2": 151
+  },
+  {
+    "ID": 87,
+    "Gender": "1100",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 309,
+    "EmployedLabourForceNationalDef_2": 300
+  },
+  {
+    "ID": 88,
+    "Gender": "1100",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 111,
+    "EmployedLabourForceNationalDef_2": 111
+  },
+  {
+    "ID": 89,
+    "Gender": "1100",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 43,
+    "EmployedLabourForceNationalDef_2": 41
+  },
+  {
+    "ID": 90,
+    "Gender": "1100",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 918,
+    "EmployedLabourForceNationalDef_2": 905
+  },
+  {
+    "ID": 91,
+    "Gender": "1100",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 304,
+    "EmployedLabourForceNationalDef_2": 240
+  },
+  {
+    "ID": 92,
+    "Gender": "1100",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 110,
+    "EmployedLabourForceNationalDef_2": 92
+  },
+  {
+    "ID": 93,
+    "Gender": "1100",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 80,
+    "EmployedLabourForceNationalDef_2": 63
+  },
+  {
+    "ID": 94,
+    "Gender": "1100",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 95,
+    "Gender": "1100",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 18,
+    "EmployedLabourForceNationalDef_2": 16
+  },
+  {
+    "ID": 96,
+    "Gender": "1100",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 8443,
+    "EmployedLabourForceNationalDef_2": 8186
+  },
+  {
+    "ID": 97,
+    "Gender": "1100",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1988,
+    "EmployedLabourForceNationalDef_2": 1846
+  },
+  {
+    "ID": 98,
+    "Gender": "1100",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 984,
+    "EmployedLabourForceNationalDef_2": 917
+  },
+  {
+    "ID": 99,
+    "Gender": "1100",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 354,
+    "EmployedLabourForceNationalDef_2": 341
+  },
+  {
+    "ID": 100,
+    "Gender": "1100",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 103,
+    "EmployedLabourForceNationalDef_2": 94
+  },
+  {
+    "ID": 101,
+    "Gender": "1100",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 57,
+    "EmployedLabourForceNationalDef_2": 51
+  },
+  {
+    "ID": 102,
+    "Gender": "1100",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 41,
+    "EmployedLabourForceNationalDef_2": 32
+  },
+  {
+    "ID": 103,
+    "Gender": "1100",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 104,
+    "Gender": "1100",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 105,
+    "Gender": "3000",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 4842,
+    "EmployedLabourForceNationalDef_2": 4667
+  },
+  {
+    "ID": 106,
+    "Gender": "3000",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1249,
+    "EmployedLabourForceNationalDef_2": 1164
+  },
+  {
+    "ID": 107,
+    "Gender": "3000",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 562,
+    "EmployedLabourForceNationalDef_2": 513
+  },
+  {
+    "ID": 108,
+    "Gender": "3000",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 3380,
+    "EmployedLabourForceNationalDef_2": 3326
+  },
+  {
+    "ID": 109,
+    "Gender": "3000",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 836,
+    "EmployedLabourForceNationalDef_2": 804
+  },
+  {
+    "ID": 110,
+    "Gender": "3000",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 355,
+    "EmployedLabourForceNationalDef_2": 341
+  },
+  {
+    "ID": 111,
+    "Gender": "3000",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 706,
+    "EmployedLabourForceNationalDef_2": 697
+  },
+  {
+    "ID": 112,
+    "Gender": "3000",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 178,
+    "EmployedLabourForceNationalDef_2": 173
+  },
+  {
+    "ID": 113,
+    "Gender": "3000",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 115,
+    "EmployedLabourForceNationalDef_2": 95
+  },
+  {
+    "ID": 114,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 756,
+    "EmployedLabourForceNationalDef_2": 644
+  },
+  {
+    "ID": 115,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 235,
+    "EmployedLabourForceNationalDef_2": 188
+  },
+  {
+    "ID": 116,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 92,
+    "EmployedLabourForceNationalDef_2": 78
+  },
+  {
+    "ID": 117,
+    "Gender": "3000",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 104,
+    "EmployedLabourForceNationalDef_2": 94
+  },
+  {
+    "ID": 118,
+    "Gender": "3000",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 45,
+    "EmployedLabourForceNationalDef_2": 30
+  },
+  {
+    "ID": 119,
+    "Gender": "3000",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 25,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 120,
+    "Gender": "3000",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 765,
+    "EmployedLabourForceNationalDef_2": 765
+  },
+  {
+    "ID": 121,
+    "Gender": "3000",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 166,
+    "EmployedLabourForceNationalDef_2": 153
+  },
+  {
+    "ID": 122,
+    "Gender": "3000",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 69,
+    "EmployedLabourForceNationalDef_2": 65
+  },
+  {
+    "ID": 123,
+    "Gender": "3000",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1228,
+    "EmployedLabourForceNationalDef_2": 1194
+  },
+  {
+    "ID": 124,
+    "Gender": "3000",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 222,
+    "EmployedLabourForceNationalDef_2": 215
+  },
+  {
+    "ID": 125,
+    "Gender": "3000",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 135,
+    "EmployedLabourForceNationalDef_2": 127
+  },
+  {
+    "ID": 126,
+    "Gender": "3000",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 805,
+    "EmployedLabourForceNationalDef_2": 742
+  },
+  {
+    "ID": 127,
+    "Gender": "3000",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 247,
+    "EmployedLabourForceNationalDef_2": 232
+  },
+  {
+    "ID": 128,
+    "Gender": "3000",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 101,
+    "EmployedLabourForceNationalDef_2": 99
+  },
+  {
+    "ID": 129,
+    "Gender": "3000",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 534,
+    "EmployedLabourForceNationalDef_2": 519
+  },
+  {
+    "ID": 130,
+    "Gender": "3000",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 139,
+    "EmployedLabourForceNationalDef_2": 131
+  },
+  {
+    "ID": 131,
+    "Gender": "3000",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 42,
+    "EmployedLabourForceNationalDef_2": 40
+  },
+  {
+    "ID": 132,
+    "Gender": "3000",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 404,
+    "EmployedLabourForceNationalDef_2": 392
+  },
+  {
+    "ID": 133,
+    "Gender": "3000",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 73,
+    "EmployedLabourForceNationalDef_2": 73
+  },
+  {
+    "ID": 134,
+    "Gender": "3000",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 34,
+    "EmployedLabourForceNationalDef_2": 32
+  },
+  {
+    "ID": 135,
+    "Gender": "3000",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 191,
+    "EmployedLabourForceNationalDef_2": 182
+  },
+  {
+    "ID": 136,
+    "Gender": "3000",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 55,
+    "EmployedLabourForceNationalDef_2": 55
+  },
+  {
+    "ID": 137,
+    "Gender": "3000",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 18,
+    "EmployedLabourForceNationalDef_2": 18
+  },
+  {
+    "ID": 138,
+    "Gender": "3000",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 162,
+    "EmployedLabourForceNationalDef_2": 162
+  },
+  {
+    "ID": 139,
+    "Gender": "3000",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 22,
+    "EmployedLabourForceNationalDef_2": 22
+  },
+  {
+    "ID": 140,
+    "Gender": "3000",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 141,
+    "Gender": "3000",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 53,
+    "EmployedLabourForceNationalDef_2": 53
+  },
+  {
+    "ID": 142,
+    "Gender": "3000",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 26,
+    "EmployedLabourForceNationalDef_2": 26
+  },
+  {
+    "ID": 143,
+    "Gender": "3000",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 144,
+    "Gender": "3000",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 34,
+    "EmployedLabourForceNationalDef_2": 34
+  },
+  {
+    "ID": 145,
+    "Gender": "3000",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 38,
+    "EmployedLabourForceNationalDef_2": 38
+  },
+  {
+    "ID": 146,
+    "Gender": "3000",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 147,
+    "Gender": "3000",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 210,
+    "EmployedLabourForceNationalDef_2": 178
+  },
+  {
+    "ID": 148,
+    "Gender": "3000",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 76,
+    "EmployedLabourForceNationalDef_2": 76
+  },
+  {
+    "ID": 149,
+    "Gender": "3000",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 21,
+    "EmployedLabourForceNationalDef_2": 15
+  },
+  {
+    "ID": 150,
+    "Gender": "3000",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 18,
+    "EmployedLabourForceNationalDef_2": 18
+  },
+  {
+    "ID": 151,
+    "Gender": "3000",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 152,
+    "Gender": "3000",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 153,
+    "Gender": "3000",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 335,
+    "EmployedLabourForceNationalDef_2": 335
+  },
+  {
+    "ID": 154,
+    "Gender": "3000",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 125,
+    "EmployedLabourForceNationalDef_2": 107
+  },
+  {
+    "ID": 155,
+    "Gender": "3000",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 96,
+    "EmployedLabourForceNationalDef_2": 83
+  },
+  {
+    "ID": 156,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 53,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 157,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 53,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 158,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 26,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 159,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 92,
+    "EmployedLabourForceNationalDef_2": 84
+  },
+  {
+    "ID": 160,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 161,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 19,
+    "EmployedLabourForceNationalDef_2": 17
+  },
+  {
+    "ID": 162,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 416,
+    "EmployedLabourForceNationalDef_2": 369
+  },
+  {
+    "ID": 163,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 150,
+    "EmployedLabourForceNationalDef_2": 150
+  },
+  {
+    "ID": 164,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 89,
+    "EmployedLabourForceNationalDef_2": 83
+  },
+  {
+    "ID": 165,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 4281,
+    "EmployedLabourForceNationalDef_2": 4215
+  },
+  {
+    "ID": 166,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1040,
+    "EmployedLabourForceNationalDef_2": 1008
+  },
+  {
+    "ID": 167,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 427,
+    "EmployedLabourForceNationalDef_2": 413
+  },
+  {
+    "ID": 168,
+    "Gender": "3000",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 169,
+    "Gender": "3000",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 170,
+    "Gender": "3000",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 171,
+    "Gender": "3000",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 469,
+    "EmployedLabourForceNationalDef_2": 469
+  },
+  {
+    "ID": 172,
+    "Gender": "3000",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 170,
+    "EmployedLabourForceNationalDef_2": 162
+  },
+  {
+    "ID": 173,
+    "Gender": "3000",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 47,
+    "EmployedLabourForceNationalDef_2": 47
+  },
+  {
+    "ID": 174,
+    "Gender": "3000",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 432,
+    "EmployedLabourForceNationalDef_2": 398
+  },
+  {
+    "ID": 175,
+    "Gender": "3000",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 79,
+    "EmployedLabourForceNationalDef_2": 79
+  },
+  {
+    "ID": 176,
+    "Gender": "3000",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 68,
+    "EmployedLabourForceNationalDef_2": 58
+  },
+  {
+    "ID": 177,
+    "Gender": "3000",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 842,
+    "EmployedLabourForceNationalDef_2": 802
+  },
+  {
+    "ID": 178,
+    "Gender": "3000",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 179,
+    "EmployedLabourForceNationalDef_2": 179
+  },
+  {
+    "ID": 179,
+    "Gender": "3000",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 77,
+    "EmployedLabourForceNationalDef_2": 77
+  },
+  {
+    "ID": 180,
+    "Gender": "3000",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 151,
+    "EmployedLabourForceNationalDef_2": 151
+  },
+  {
+    "ID": 181,
+    "Gender": "3000",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 39,
+    "EmployedLabourForceNationalDef_2": 39
+  },
+  {
+    "ID": 182,
+    "Gender": "3000",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 36,
+    "EmployedLabourForceNationalDef_2": 36
+  },
+  {
+    "ID": 183,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 636,
+    "EmployedLabourForceNationalDef_2": 596
+  },
+  {
+    "ID": 184,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 85,
+    "EmployedLabourForceNationalDef_2": 85
+  },
+  {
+    "ID": 185,
+    "Gender": "3000",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 60,
+    "EmployedLabourForceNationalDef_2": 60
+  },
+  {
+    "ID": 186,
+    "Gender": "3000",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 62,
+    "EmployedLabourForceNationalDef_2": 62
+  },
+  {
+    "ID": 187,
+    "Gender": "3000",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 28,
+    "EmployedLabourForceNationalDef_2": 22
+  },
+  {
+    "ID": 188,
+    "Gender": "3000",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 27,
+    "EmployedLabourForceNationalDef_2": 21
+  },
+  {
+    "ID": 189,
+    "Gender": "3000",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1555,
+    "EmployedLabourForceNationalDef_2": 1509
+  },
+  {
+    "ID": 190,
+    "Gender": "3000",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 404,
+    "EmployedLabourForceNationalDef_2": 362
+  },
+  {
+    "ID": 191,
+    "Gender": "3000",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 144,
+    "EmployedLabourForceNationalDef_2": 130
+  },
+  {
+    "ID": 192,
+    "Gender": "3000",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 274,
+    "EmployedLabourForceNationalDef_2": 265
+  },
+  {
+    "ID": 193,
+    "Gender": "3000",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 111,
+    "EmployedLabourForceNationalDef_2": 111
+  },
+  {
+    "ID": 194,
+    "Gender": "3000",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 37,
+    "EmployedLabourForceNationalDef_2": 35
+  },
+  {
+    "ID": 195,
+    "Gender": "3000",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 400,
+    "EmployedLabourForceNationalDef_2": 400
+  },
+  {
+    "ID": 196,
+    "Gender": "3000",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 135,
+    "EmployedLabourForceNationalDef_2": 107
+  },
+  {
+    "ID": 197,
+    "Gender": "3000",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 52,
+    "EmployedLabourForceNationalDef_2": 38
+  },
+  {
+    "ID": 198,
+    "Gender": "3000",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 21,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 199,
+    "Gender": "3000",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 200,
+    "Gender": "3000",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 201,
+    "Gender": "3000",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 4643,
+    "EmployedLabourForceNationalDef_2": 4477
+  },
+  {
+    "ID": 202,
+    "Gender": "3000",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1197,
+    "EmployedLabourForceNationalDef_2": 1122
+  },
+  {
+    "ID": 203,
+    "Gender": "3000",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 529,
+    "EmployedLabourForceNationalDef_2": 486
+  },
+  {
+    "ID": 204,
+    "Gender": "3000",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 177,
+    "EmployedLabourForceNationalDef_2": 177
+  },
+  {
+    "ID": 205,
+    "Gender": "3000",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 43,
+    "EmployedLabourForceNationalDef_2": 43
+  },
+  {
+    "ID": 206,
+    "Gender": "3000",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 33,
+    "EmployedLabourForceNationalDef_2": 27
+  },
+  {
+    "ID": 207,
+    "Gender": "3000",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 22,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 208,
+    "Gender": "3000",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 209,
+    "Gender": "3000",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 210,
+    "Gender": "4000",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 3995,
+    "EmployedLabourForceNationalDef_2": 3892
+  },
+  {
+    "ID": 211,
+    "Gender": "4000",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 851,
+    "EmployedLabourForceNationalDef_2": 776
+  },
+  {
+    "ID": 212,
+    "Gender": "4000",
+    "PersonalCharacteristics": "10000",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 483,
+    "EmployedLabourForceNationalDef_2": 458
+  },
+  {
+    "ID": 213,
+    "Gender": "4000",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 2964,
+    "EmployedLabourForceNationalDef_2": 2914
+  },
+  {
+    "ID": 214,
+    "Gender": "4000",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 607,
+    "EmployedLabourForceNationalDef_2": 558
+  },
+  {
+    "ID": 215,
+    "Gender": "4000",
+    "PersonalCharacteristics": "14   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 362,
+    "EmployedLabourForceNationalDef_2": 358
+  },
+  {
+    "ID": 216,
+    "Gender": "4000",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 695,
+    "EmployedLabourForceNationalDef_2": 695
+  },
+  {
+    "ID": 217,
+    "Gender": "4000",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 142,
+    "EmployedLabourForceNationalDef_2": 130
+  },
+  {
+    "ID": 218,
+    "Gender": "4000",
+    "PersonalCharacteristics": "15   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 64,
+    "EmployedLabourForceNationalDef_2": 55
+  },
+  {
+    "ID": 219,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 336,
+    "EmployedLabourForceNationalDef_2": 282
+  },
+  {
+    "ID": 220,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 101,
+    "EmployedLabourForceNationalDef_2": 88
+  },
+  {
+    "ID": 221,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21380",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 56,
+    "EmployedLabourForceNationalDef_2": 45
+  },
+  {
+    "ID": 222,
+    "Gender": "4000",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 221,
+    "EmployedLabourForceNationalDef_2": 201
+  },
+  {
+    "ID": 223,
+    "Gender": "4000",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 43,
+    "EmployedLabourForceNationalDef_2": 24
+  },
+  {
+    "ID": 224,
+    "Gender": "4000",
+    "PersonalCharacteristics": "1    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 225,
+    "Gender": "4000",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 718,
+    "EmployedLabourForceNationalDef_2": 718
+  },
+  {
+    "ID": 226,
+    "Gender": "4000",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 217,
+    "EmployedLabourForceNationalDef_2": 204
+  },
+  {
+    "ID": 227,
+    "Gender": "4000",
+    "PersonalCharacteristics": "2    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 85,
+    "EmployedLabourForceNationalDef_2": 80
+  },
+  {
+    "ID": 228,
+    "Gender": "4000",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 994,
+    "EmployedLabourForceNationalDef_2": 987
+  },
+  {
+    "ID": 229,
+    "Gender": "4000",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 187,
+    "EmployedLabourForceNationalDef_2": 166
+  },
+  {
+    "ID": 230,
+    "Gender": "4000",
+    "PersonalCharacteristics": "3    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 140,
+    "EmployedLabourForceNationalDef_2": 133
+  },
+  {
+    "ID": 231,
+    "Gender": "4000",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 602,
+    "EmployedLabourForceNationalDef_2": 602
+  },
+  {
+    "ID": 232,
+    "Gender": "4000",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 97,
+    "EmployedLabourForceNationalDef_2": 93
+  },
+  {
+    "ID": 233,
+    "Gender": "4000",
+    "PersonalCharacteristics": "4    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 63,
+    "EmployedLabourForceNationalDef_2": 63
+  },
+  {
+    "ID": 234,
+    "Gender": "4000",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 404,
+    "EmployedLabourForceNationalDef_2": 395
+  },
+  {
+    "ID": 235,
+    "Gender": "4000",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 84,
+    "EmployedLabourForceNationalDef_2": 84
+  },
+  {
+    "ID": 236,
+    "Gender": "4000",
+    "PersonalCharacteristics": "5    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 54,
+    "EmployedLabourForceNationalDef_2": 52
+  },
+  {
+    "ID": 237,
+    "Gender": "4000",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 284,
+    "EmployedLabourForceNationalDef_2": 284
+  },
+  {
+    "ID": 238,
+    "Gender": "4000",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 69,
+    "EmployedLabourForceNationalDef_2": 69
+  },
+  {
+    "ID": 239,
+    "Gender": "4000",
+    "PersonalCharacteristics": "6    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 27,
+    "EmployedLabourForceNationalDef_2": 25
+  },
+  {
+    "ID": 240,
+    "Gender": "4000",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 156,
+    "EmployedLabourForceNationalDef_2": 156
+  },
+  {
+    "ID": 241,
+    "Gender": "4000",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 29,
+    "EmployedLabourForceNationalDef_2": 29
+  },
+  {
+    "ID": 242,
+    "Gender": "4000",
+    "PersonalCharacteristics": "7    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 28,
+    "EmployedLabourForceNationalDef_2": 28
+  },
+  {
+    "ID": 243,
+    "Gender": "4000",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 105,
+    "EmployedLabourForceNationalDef_2": 105
+  },
+  {
+    "ID": 244,
+    "Gender": "4000",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 21,
+    "EmployedLabourForceNationalDef_2": 21
+  },
+  {
+    "ID": 245,
+    "Gender": "4000",
+    "PersonalCharacteristics": "8    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 246,
+    "Gender": "4000",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 90,
+    "EmployedLabourForceNationalDef_2": 81
+  },
+  {
+    "ID": 247,
+    "Gender": "4000",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 21,
+    "EmployedLabourForceNationalDef_2": 17
+  },
+  {
+    "ID": 248,
+    "Gender": "4000",
+    "PersonalCharacteristics": "9    ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 249,
+    "Gender": "4000",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 68,
+    "EmployedLabourForceNationalDef_2": 68
+  },
+  {
+    "ID": 250,
+    "Gender": "4000",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 15,
+    "EmployedLabourForceNationalDef_2": 15
+  },
+  {
+    "ID": 251,
+    "Gender": "4000",
+    "PersonalCharacteristics": "10   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 252,
+    "Gender": "4000",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 71,
+    "EmployedLabourForceNationalDef_2": 71
+  },
+  {
+    "ID": 253,
+    "Gender": "4000",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 15,
+    "EmployedLabourForceNationalDef_2": 15
+  },
+  {
+    "ID": 254,
+    "Gender": "4000",
+    "PersonalCharacteristics": "11   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 255,
+    "Gender": "4000",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 20,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 256,
+    "Gender": "4000",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 257,
+    "Gender": "4000",
+    "PersonalCharacteristics": "12   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 258,
+    "Gender": "4000",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 261,
+    "EmployedLabourForceNationalDef_2": 213
+  },
+  {
+    "ID": 259,
+    "Gender": "4000",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 52,
+    "EmployedLabourForceNationalDef_2": 39
+  },
+  {
+    "ID": 260,
+    "Gender": "4000",
+    "PersonalCharacteristics": "13   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 49,
+    "EmployedLabourForceNationalDef_2": 44
+  },
+  {
+    "ID": 261,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 50,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 262,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 71,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 263,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21210",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 264,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 97,
+    "EmployedLabourForceNationalDef_2": 97
+  },
+  {
+    "ID": 265,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 25,
+    "EmployedLabourForceNationalDef_2": 21
+  },
+  {
+    "ID": 266,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21220",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 267,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 566,
+    "EmployedLabourForceNationalDef_2": 550
+  },
+  {
+    "ID": 268,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 188,
+    "EmployedLabourForceNationalDef_2": 188
+  },
+  {
+    "ID": 269,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21230",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 61,
+    "EmployedLabourForceNationalDef_2": 61
+  },
+  {
+    "ID": 270,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 3282,
+    "EmployedLabourForceNationalDef_2": 3246
+  },
+  {
+    "ID": 271,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 567,
+    "EmployedLabourForceNationalDef_2": 567
+  },
+  {
+    "ID": 272,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21240",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 402,
+    "EmployedLabourForceNationalDef_2": 390
+  },
+  {
+    "ID": 273,
+    "Gender": "4000",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 274,
+    "Gender": "4000",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 275,
+    "Gender": "4000",
+    "PersonalCharacteristics": "16   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 276,
+    "Gender": "4000",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 237,
+    "EmployedLabourForceNationalDef_2": 228
+  },
+  {
+    "ID": 277,
+    "Gender": "4000",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 65,
+    "EmployedLabourForceNationalDef_2": 57
+  },
+  {
+    "ID": 278,
+    "Gender": "4000",
+    "PersonalCharacteristics": "17   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 25,
+    "EmployedLabourForceNationalDef_2": 25
+  },
+  {
+    "ID": 279,
+    "Gender": "4000",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 463,
+    "EmployedLabourForceNationalDef_2": 463
+  },
+  {
+    "ID": 280,
+    "Gender": "4000",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 133,
+    "EmployedLabourForceNationalDef_2": 133
+  },
+  {
+    "ID": 281,
+    "Gender": "4000",
+    "PersonalCharacteristics": "18   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 79,
+    "EmployedLabourForceNationalDef_2": 69
+  },
+  {
+    "ID": 282,
+    "Gender": "4000",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 741,
+    "EmployedLabourForceNationalDef_2": 714
+  },
+  {
+    "ID": 283,
+    "Gender": "4000",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 124,
+    "EmployedLabourForceNationalDef_2": 119
+  },
+  {
+    "ID": 284,
+    "Gender": "4000",
+    "PersonalCharacteristics": "19   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 100,
+    "EmployedLabourForceNationalDef_2": 100
+  },
+  {
+    "ID": 285,
+    "Gender": "4000",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 582,
+    "EmployedLabourForceNationalDef_2": 582
+  },
+  {
+    "ID": 286,
+    "Gender": "4000",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 105,
+    "EmployedLabourForceNationalDef_2": 92
+  },
+  {
+    "ID": 287,
+    "Gender": "4000",
+    "PersonalCharacteristics": "20   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 83,
+    "EmployedLabourForceNationalDef_2": 83
+  },
+  {
+    "ID": 288,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 1342,
+    "EmployedLabourForceNationalDef_2": 1298
+  },
+  {
+    "ID": 289,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 243,
+    "EmployedLabourForceNationalDef_2": 230
+  },
+  {
+    "ID": 290,
+    "Gender": "4000",
+    "PersonalCharacteristics": "21   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 103,
+    "EmployedLabourForceNationalDef_2": 92
+  },
+  {
+    "ID": 291,
+    "Gender": "4000",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 292,
+    "Gender": "4000",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 293,
+    "Gender": "4000",
+    "PersonalCharacteristics": "22   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 294,
+    "Gender": "4000",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 19,
+    "EmployedLabourForceNationalDef_2": 19
+  },
+  {
+    "ID": 295,
+    "Gender": "4000",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 296,
+    "Gender": "4000",
+    "PersonalCharacteristics": "23   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 21,
+    "EmployedLabourForceNationalDef_2": 21
+  },
+  {
+    "ID": 297,
+    "Gender": "4000",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 34,
+    "EmployedLabourForceNationalDef_2": 34
+  },
+  {
+    "ID": 298,
+    "Gender": "4000",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 299,
+    "Gender": "4000",
+    "PersonalCharacteristics": "24   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 300,
+    "Gender": "4000",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 518,
+    "EmployedLabourForceNationalDef_2": 505
+  },
+  {
+    "ID": 301,
+    "Gender": "4000",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 169,
+    "EmployedLabourForceNationalDef_2": 132
+  },
+  {
+    "ID": 302,
+    "Gender": "4000",
+    "PersonalCharacteristics": "25   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 58,
+    "EmployedLabourForceNationalDef_2": 54
+  },
+  {
+    "ID": 303,
+    "Gender": "4000",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 59,
+    "EmployedLabourForceNationalDef_2": 49
+  },
+  {
+    "ID": 304,
+    "Gender": "4000",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 305,
+    "Gender": "4000",
+    "PersonalCharacteristics": "26   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 306,
+    "Gender": "4000",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 3800,
+    "EmployedLabourForceNationalDef_2": 3709
+  },
+  {
+    "ID": 307,
+    "Gender": "4000",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 791,
+    "EmployedLabourForceNationalDef_2": 724
+  },
+  {
+    "ID": 308,
+    "Gender": "4000",
+    "PersonalCharacteristics": "27   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 455,
+    "EmployedLabourForceNationalDef_2": 430
+  },
+  {
+    "ID": 309,
+    "Gender": "4000",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 177,
+    "EmployedLabourForceNationalDef_2": 165
+  },
+  {
+    "ID": 310,
+    "Gender": "4000",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 60,
+    "EmployedLabourForceNationalDef_2": 51
+  },
+  {
+    "ID": 311,
+    "Gender": "4000",
+    "PersonalCharacteristics": "28   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 24,
+    "EmployedLabourForceNationalDef_2": 24
+  },
+  {
+    "ID": 312,
+    "Gender": "4000",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9001",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": 18,
+    "EmployedLabourForceNationalDef_2": 18
+  },
+  {
+    "ID": 313,
+    "Gender": "4000",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9002",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  },
+  {
+    "ID": 314,
+    "Gender": "4000",
+    "PersonalCharacteristics": "29   ",
+    "CaribbeanNetherlands": "GM9003",
+    "Periods": "2012JJ00",
+    "EmployedLabourForceInternatDef_1": null,
+    "EmployedLabourForceNationalDef_2": null
+  }
+]

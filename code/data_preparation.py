@@ -1,3 +1,4 @@
+from datetime import datetime
 import pandas as pd
 from sqlalchemy import create_engine, String, Text
 from sqlalchemy.orm import DeclarativeBase, Session, mapped_column, Mapped

@@ -1,0 +1,20 @@
+[
+  {
+    "Key": "1100",
+    "Title": "Total male and female",
+    "Description": "",
+    "CategoryGroupID": null
+  },
+  {
+    "Key": "3000",
+    "Title": "Male",
+    "Description": "",
+    "CategoryGroupID": null
+  },
+  {
+    "Key": "4000",
+    "Title": "Female",
+    "Description": "",
+    "CategoryGroupID": null
+  }
+]
