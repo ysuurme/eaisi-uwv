@@ -1,3 +1,6 @@
+# raw data
+data/0_raw/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
