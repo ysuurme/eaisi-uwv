@@ -7,6 +7,7 @@
 - [Project Contributions](#project-contributions)
 - [GitHub Flow](#github-flow)
 - [Project Management](#project-management)
+- [Data Management](#data-management)
 
 ## Getting Started
 
@@ -101,3 +102,31 @@ We use a **GitHub Project** @project-eaisi-uwv to organize our work, track progr
 6. Move to `In Review` when the Pull Request is ready
 7. Move to `Done` after the Pull Request branch is merged to main
 
+## Data Management
+This documentation outlines the architectural strategy for our data pipeline, utilizing a Mini-Medallion Architecture implemented with Python 3, SQLAlchemy Core & ORM, and SQLite3.
+The goal is to provide a lightweight, portable, and reproducible ELT (Extract, Load, Transform) framework for our machine learning project.
+
+# 0_Raw: The "Unstructured Zone".
+Technology: Local project directory (/data/0_Raw/).
+Strategy: Original files (.json, .csv, etc.) exactly as received from APIs.
+Excluded from Git (.gitignore) to prevent unnecessary data storage in the repository. Acts as the "Source of Truth" for debugging and re-processing.
+
+# 1_Bronze: The "Landing Zone" and our first structured representation of the raw data.
+Technology: SQLite3 database inserts via SQLAlchemy Core (optimized for high-speed bulk inserts).
+Strategy: We implement a Star Schema at this level in the form of Fact (the main data) and each Dimension (the lookup tables).
+- Fact Tables: Store the main numerical data (e.g., TypedDataSet).
+- Dimension Tables: Store lookup data (e.g., Periods, Gender, PersonalCharacteristics).
+
+# 2_Silver: The "Clean Zone" that focuses on data quality and integration.
+Technology: SQLite3 database inserts via SQLAlchemy ORM (better for complex logic).
+Strategy: Transform separate Fact and Dimension tables into a single, "meaningful" table by:
+- Flattening: Extracting nested JSON structures into flat columns
+- DataType Casting: Converting strings to proper DATETIME or NUMERIC types
+- Standardization: Trimming whitespace (e.g., "14   " $\rightarrow$ "14") and handling NULL values
+- Enrichment: Performing JOIN operations between Facts and Dimensions to replace cryptic codes (e.g., GM9001) with human-readable titles (Bonaire).
+
+# 3_Gold: The "Business/ML Zone" that provides clean features for analysis and ML training.
+Technology: SQLite3 database inserts via SQLAlchemy ORM (better for complex logic).
+Strategy: Feature engineering and applying business logic by:
+- Aggregations: Calculating monthly averages or regional totals.
+- Feature Engineering: gold tables are structured as a Feature Store where each row represents a clean observation ready for model ingestion.
