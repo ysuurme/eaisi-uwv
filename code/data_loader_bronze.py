@@ -1,15 +1,16 @@
-import logging
 import json
+import logging
 from pathlib import Path
-from datetime import datetime
 
 # --- Third Party Libraries ---
-from sqlalchemy import create_engine, String
-from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
+from sqlalchemy import create_engine, insert, MetaData, Table, Column, String, Integer, Float
+
 
 # --- Configuration ---
-DIR_DB_BRONZE = "data/1_bronze/bronze_data.db"
-DIR_JSON_DATA = "data/0_raw/82070ENG/TypedDataSet.json"
+try:
+    from config import DIR_DATA_RAW, DIR_DB_BRONZE
+except ImportError:
+    raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
 
 # --- Logging ---
@@ -24,95 +25,108 @@ logger = logging.getLogger(__name__)
 # --- "Data Lake" 0_raw to Database 1_bronze ---
 class DatabaseBronze:
     """
-    Manages the SQLite database in the bronze layer (data/1_bronze) using SQLAlchemy.
+    Manages the SQLite database in the bronze layer using SQLAlchemy Core.
+    Dynamically maps JSON structures to SQLite tables.
     """
-    def __init__(self, db_path: str):
-        self.db_path = Path(db_path)
+    def __init__(self, data_raw_path: Path, db_path: Path):
+        self.data_raw_path = data_raw_path
+        self.db_path = db_path
+        # Ensure directory exists
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{self.db_path}")
+        self.metadata = MetaData()
 
 
-    def create_table(self):
+    def _infer_column_type(self, value):
+            """Simple type inference for 'Raw' data integrity."""
+            if isinstance(value, int):
+                return Integer
+            if isinstance(value, float):
+                return Float
+            return String  # Default to String for codes/keys
+
+
+    def ingest_0_raw_folder(self, identifier: str):
         """
-        Creates tables based on the ORM models.
-        Drops existing tables first to ensure schema is up to date.
+        Scans a specific identifier folder and ingests Fact and Dimension files.
         """
-        # Drop existing table to ensure we have the correct schema
-        Base.metadata.drop_all(self.engine)
-        Base.metadata.create_all(self.engine)
-        logger.info(f"Table '{TransactionORM.__tablename__}' created/reset in {self.db_path}")
+        folder_path = Path(self.data_raw_path, identifier)
+        if not folder_path.exists():
+            logger.error(f"Identifier folder {identifier} not found in {self.data_raw_path}")
+            return
 
+        for json_path in folder_path.glob("*.json"):
+            # Determine Fact table or Dimension table
+            if json_path.name == "TypedDataSet.json":
+                table_name = f"{identifier}_fact"
+            else:
+                table_name = f"{identifier}_dim_{json_path.stem}"
 
-    def insert_json_data(self, json_path: str):
+            self.insert_json_data(json_path, table_name)
+
+    def insert_json_data(self, json_path: Path, table_name: str):
         """
-        Reads a JSON file, validates it against the TransactionORM,
-        and inserts the data into the database.
-        
-        Args:
-            json_path (str): The path to the JSON file.
+        Reads JSON, dynamically creates table based on keys, and bulk inserts.
         """
         try:
             with open(json_path, 'r') as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Error reading JSON file {json_path}: {e}")
-            return
+                data = json.load(f)          
+            if not data:
+                return
             
-        with Session(self.engine) as session:
+        except Exception as e:
+            logger.error(f"Failed to read {json_path}: {e}")
+            return
+
+        # Inspect the first record to define the table schema dynamically
+        filename = json_path.name
+        sample_record = data[0]
+
+        # Determine the Primary Key Name, for Facts == "ID", for Dimensions try "Key" or "DimensionKey"
+        potential_keys = ["ID", "Key", "DimensionKey"]
+        pk_candidate = next((k for k in potential_keys if k in sample_record), None)
+        if not pk_candidate:
+            logger.error(f"No ID found in {filename}, skipping table insertion.")
+            return
+
+        # Pre-process data: clean strings and prepare columns
+        cleaned_data = []
+        for record in data:
+            clean_record = {k: (v.strip() if isinstance(v, str) else v) for k, v in record.items()}
+
+            # Create the specific Concatenated Primary Key
+            original_id = clean_record.get(pk_candidate)
+            clean_record["bronze_pk"] = f"{filename}_{original_id}"
+            clean_record["_source_file"] = filename
+            cleaned_data.append(clean_record)
+      
+        # Define Columns
+        sample_record = cleaned_data[0]
+        columns = []
+
+        # Ensure bronze_id is the Primary Key
+        for key, value in sample_record.items():
+            col_type = self._infer_column_type(value)
+            bool_pk = (key == "bronze_pk")
+            columns.append(Column(key, col_type, primary_key=bool_pk))
+
+        # Create Table
+        table = Table(table_name, self.metadata, *columns, extend_existing=True)
+        table.drop(self.engine, checkfirst=True) # Reset Bronze for fresh landing
+        table.create(self.engine)
+
+        # Bulk Insert using SQLAlchemy Core for speed
+        with self.engine.begin() as conn:
             try:
-                for item in data:
-                    orm_object = TransactionORM(**item)
-                    session.add(orm_object)
-                session.commit()
-                logger.info(f"Successfully inserted {len(data)} records from {json_path}")
+                conn.execute(insert(table), cleaned_data)
+                logger.info(f"Loaded {len(cleaned_data)} rows into {table_name}")
             except Exception as e:
-                session.rollback()
-                logger.error(f"Error inserting data from {json_path}: {e}")
-                raise
-
-
-    def fetch_all(self, table_orm):
-        """Fetches all rows from a table represented by an ORM class."""
-        with Session(self.engine) as session:
-            try:
-                return session.query(table_orm).all()
-            except Exception as e:
-                logger.error(f"Failed to fetch data from '{table_orm.__tablename__}': {e}")
-                return []
-
-
-# --- Database Layer (SQLAlchemy) ---
-class Base(DeclarativeBase):
-    pass
-    
-
-class TransactionORM(Base):
-    """Represents the SQL Table structure for TypedDataSet."""
-    __tablename__ = "TypedDataSet"
-
-    key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    ID: Mapped[int] = mapped_column(unique=True)
-    Gender: Mapped[str] = mapped_column(String(255))
-    PersonalCharacteristics: Mapped[str] = mapped_column(String(255))
-    CaribbeanNetherlands: Mapped[str] = mapped_column(String(255))
-    Periods: Mapped[str] = mapped_column(String(255))
-    EmployedLabourForceInternatDef_1: Mapped[int] = mapped_column(nullable=True)
-    EmployedLabourForceNationalDef_2: Mapped[int] = mapped_column(nullable=True)
-    # insert_datetime: Mapped[datetime] = mapped_column(default=datetime.now)
+                logger.error(f"Bulk insert failed for {table_name}: {e}")
 
 
 # --- Main execution ---
-if __name__ == "__main__":
-    # Initialize
-    db = DatabaseBronze(DIR_DB_BRONZE)
+db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
 
-    # Create table
-    db.create_table()
-    
-    # Insert data from JSON
-    db.insert_json_data(DIR_JSON_DATA)
+# Ingest data from 0_raw based on identifier and create db tables
+db.ingest_0_raw_folder("80072ned")
 
-    # Verify
-    print(f"\n--- Data in {TransactionORM.__tablename__} ---")
-    all_data = db.fetch_all(TransactionORM)
-    for row in all_data:
-        print(row)
