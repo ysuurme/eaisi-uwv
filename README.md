@@ -116,6 +116,7 @@ Excluded from Git (.gitignore) to prevent unnecessary data storage in the reposi
 - Strategy: We implement a Star Schema at this level in the form of Fact (the main data) and each Dimension (the lookup tables).
    - Fact Tables: Store the main numerical data (e.g., TypedDataSet).
    - Dimension Tables: Store lookup data (e.g., Periods, Gender, PersonalCharacteristics).
+   - Upsert Logic: "Upsert" (Update or Insert) so you only process new files in the 0_Raw folder rather than re-processing everything every time.
 
 **Silver: The "Clean Zone"**; our second structured representation of data that focuses on data quality and integration.
 - Technology: SQLite3 database inserts via SQLAlchemy ORM (better for complex logic).

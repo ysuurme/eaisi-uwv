@@ -37,18 +37,43 @@ class DatabaseBronze:
         self.metadata = MetaData()
 
 
+    def _infer_primary_key(self, file_name, data_sample: dict) -> str:
+        # Determine the Primary Key Name, for Facts == "ID", for Dimensions try "Key" or "DimensionKey"
+        potential_keys = ["ID", "Key", "DimensionKey"]
+        primary_key = next((k for k in potential_keys if k in data_sample), None)
+        if not primary_key:
+            logger.error(f"No ID found in {file_name}, skipping table insertion.")
+            return
+        return primary_key
+    
+
+    def _clean_data(self, file_name, data, primary_key) -> list:
+        """Cleans string fields by stripping whitespace and add key columns."""
+        cleaned_data = []
+        for record in data:
+            clean_record = {k: (v.strip() if isinstance(v, str) else v) for k, v in record.items()}
+
+            # Create the specific Concatenated Primary Key
+            pk = clean_record.get(primary_key)
+            clean_record["bronze_pk"] = f"{file_name}_{pk}"
+            clean_record["_source_file"] = file_name
+            cleaned_data.append(clean_record)
+
+        return cleaned_data
+
+
     def _infer_column_type(self, value):
             """Simple type inference for 'Raw' data integrity."""
             if isinstance(value, int):
                 return Integer
             if isinstance(value, float):
                 return Float
-            return String  # Default to String for codes/keys
+            return String  # Default to String for codes/keys/NULL
 
 
     def ingest_0_raw_folder(self, identifier: str):
         """
-        Scans a specific identifier folder and ingests Fact and Dimension files.
+        Scans a specific identifier folder and ingests Fact and Dimension .json files.
         """
         folder_path = Path(self.data_raw_path, identifier)
         if not folder_path.exists():
@@ -79,36 +104,23 @@ class DatabaseBronze:
             return
 
         # Inspect the first record to define the table schema dynamically
-        filename = json_path.name
-        sample_record = data[0]
-
-        # Determine the Primary Key Name, for Facts == "ID", for Dimensions try "Key" or "DimensionKey"
-        potential_keys = ["ID", "Key", "DimensionKey"]
-        pk_candidate = next((k for k in potential_keys if k in sample_record), None)
-        if not pk_candidate:
-            logger.error(f"No ID found in {filename}, skipping table insertion.")
-            return
-
-        # Pre-process data: clean strings and prepare columns
-        cleaned_data = []
-        for record in data:
-            clean_record = {k: (v.strip() if isinstance(v, str) else v) for k, v in record.items()}
-
-            # Create the specific Concatenated Primary Key
-            original_id = clean_record.get(pk_candidate)
-            clean_record["bronze_pk"] = f"{filename}_{original_id}"
-            clean_record["_source_file"] = filename
-            cleaned_data.append(clean_record)
-      
-        # Define Columns
-        sample_record = cleaned_data[0]
+        file_name = json_path.name
+        data_sample = data[0]
         columns = []
 
-        # Ensure bronze_id is the Primary Key
-        for key, value in sample_record.items():
-            col_type = self._infer_column_type(value)
-            bool_pk = (key == "bronze_pk")
-            columns.append(Column(key, col_type, primary_key=bool_pk))
+        # Determine the Table Primary Key Name, for Facts == "ID", for Dimensions try "Key" or "DimensionKey"
+        primary_key = self._infer_primary_key(file_name, data_sample)
+
+        # Pre-process data: clean strings and add supporting columns
+        cleaned_data = self._clean_data(file_name, data, primary_key)   
+      
+        # Ensure bronze_pk is the Primary Key and the first column, subsequently append list with other columns
+        columns.append(Column("bronze_pk", String, primary_key=True))
+        for key, value in cleaned_data[0].items():
+            if key == "bronze_pk":
+                continue # Skip bronze_pk as it's already added to the column list first
+            col_type = self._infer_column_type(value) # Infer column type from sample value
+            columns.append(Column(key, col_type, primary_key=False))
 
         # Create Table
         table = Table(table_name, self.metadata, *columns, extend_existing=True)
