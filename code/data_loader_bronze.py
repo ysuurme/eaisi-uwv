@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# --- "Data Lake" 0_raw to Database 1_bronze ---
+# --- "Data Lake" 0_raw to Database 1_bronze Manager Class ---
 class DatabaseBronze:
     """
     Manages the SQLite database in the bronze layer using SQLAlchemy Core.
