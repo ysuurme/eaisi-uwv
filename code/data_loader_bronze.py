@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, insert, MetaData, Table, Column, String, I
 
 # --- Configuration ---
 try:
-    from config import DIR_DATA_RAW, DIR_DB_BRONZE
+    from config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T3
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
@@ -139,6 +139,6 @@ class DatabaseBronze:
 # --- Main execution ---
 db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
 
-# Ingest data from 0_raw based on identifier and create db tables
-db.ingest_0_raw_folder("80072ned")
-
+# Process tables defined in config
+for table_id in CBS_TABLES_T3:
+    db.ingest_0_raw_folder(table_id)
