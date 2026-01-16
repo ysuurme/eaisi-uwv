@@ -9,3 +9,6 @@ dependencies = [
     "pandas>=2.3.3",
     "sqlalchemy>=2.0.45",
 ]
+
+[tool.setuptools]
+packages = ["code"]
