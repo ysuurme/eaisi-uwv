@@ -23,3 +23,9 @@ CBS_TABLES_T65 = [
     "83734NED", "81414NED", "84566NED", "82439NED", "82325NED", "81408NED", "83738NED", 
     "82623NED", "81567NED"
 ]
+
+# --- Model Storage ---
+DIR_MODELS = Path("models")
+
+# --- ML Target Column ---
+ML_TARGET_COLUMN = "Ziekteverzuimpercentage_1"

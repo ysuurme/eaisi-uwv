@@ -1,6 +1,9 @@
 # raw data
 data/0_raw/*
 
+# trained models (binary, large)
+models/*
+
 # Python-generated files
 __pycache__/
 *.py[oc]
