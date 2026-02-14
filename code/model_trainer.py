@@ -12,7 +12,10 @@ from pathlib import Path
 import joblib
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, root_mean_squared_error
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.dummy import DummyRegressor
+from sklearn.ensemble import GradientBoostingRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 from sqlalchemy import create_engine
 
 # --- Configuration ---
@@ -20,6 +23,45 @@ try:
     from config import DIR_DB_GOLD, DIR_MODELS, ML_TARGET_COLUMN
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
+
+# Add or remove entries to compare different scikit-learn regressors.
+MODEL_CONFIGS: list[tuple[str, object, dict]] = [
+    (
+        "Baseline_Mean",
+        DummyRegressor(strategy="mean"),
+        {},  # Naïve baseline — predicts training-set mean as a baseline
+    ),
+    (
+        "LinearRegression",
+        LinearRegression(),
+        {},  # Most simple regressor that captures the linear trend
+    ),
+    (
+        "RandomForest",
+        RandomForestRegressor(random_state=42),
+        {
+            "n_estimators": [100, 200],
+            "max_depth": [5, 10, None],
+        },  # 6 combos × 5 folds = 30 fits
+    ),
+    (
+        "GradientBoosting",
+        GradientBoostingRegressor(random_state=42),
+        {
+            "n_estimators": [100, 200],
+            "learning_rate": [0.05, 0.1, 0.2],
+        },  # 6 combos × 5 folds = 30 fits
+    ),
+    (
+        "HistGradientBoosting",
+        HistGradientBoostingRegressor(random_state=42),
+        {
+            "learning_rate": [0.05, 0.1, 0.2],
+            "max_iter": [100, 300],
+            "max_leaf_nodes": [30, 60],
+        },  # 12 combos × 5 folds = 60 fits
+    ),
+]
 
 # --- Logging ---
 logging.basicConfig(
@@ -34,7 +76,7 @@ logger = logging.getLogger(__name__)
 class DatasetLoader:
     """
     Loads a Gold SQLite table into feature / target arrays
-    and splits them into train and test sets.
+    and splits them using TimeSeriesSplit to preserve temporal order.
     """
 
     def __init__(self, db_path: Path, table_name: str):
@@ -45,38 +87,45 @@ class DatasetLoader:
     def load_and_split(
         self,
         target_column: str,
-        test_size: float = 0.2,
-        random_state: int = 42,
+        n_splits: int = 5,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         """
         Reads the Gold table, separates features from target,
-        drops rows with missing target values, and returns a train/test split.
+        and returns a chronological train/test split using
+        the last fold of TimeSeriesSplit.
         """
         df = pd.read_sql_table(self.table_name, self.engine)
         logger.info(f"Loaded {len(df)} rows from '{self.table_name}'")
 
-        # Drop rows where the target is missing
+        # Remove rows with NaN in target column
         df = df.dropna(subset=[target_column])
+        logger.warning(f"Removed rows with NaN in target column, processing {len(df)} rows")
+
+        # Sort chronologically so TimeSeriesSplit produces valid temporal folds
+        df = df.sort_values("Perioden_dt").reset_index(drop=True)
 
         # Separate features and target
-        y = df[target_column]
-        x = df.drop(columns=[target_column])
+        y = df[target_column].astype(float)
+        x = df.drop(columns=[target_column, "silver_id"])  # todo: drop silver_id in data_loader_gold instead
+        logger.warning("Dropped silver_id from features (to be removed in data_loader_gold in future versions)")
 
-        # Keep only numeric columns for sklearn compatibility
-        x = x.select_dtypes(include="number")
+        # Keep only numeric columns and convert pandas nullable dtypes to numpy float64
+        x = x.select_dtypes(include="number").astype(float)
+        logger.info(f"Selected {x.shape[1]} numeric feature columns")
 
-        # Fill remaining NaN feature values with column medians
-        x = x.fillna(x.median())
+        # Use the last fold so training = earliest data, test = latest data
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        *_, (train_index, test_index) = tscv.split(x)
 
-        x_train, x_test, y_train, y_test = train_test_split(
-            x, y, test_size=test_size, random_state=random_state
-        )
+        x_train, x_test = x.iloc[train_index], x.iloc[test_index]
+        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+
         logger.info(f"Train size: {len(x_train)} | Test size: {len(x_test)}")
         return x_train, x_test, y_train, y_test
 
 
 # --- Hyperparameter Tuner ---
-class HyperparameterTuner:
+class ModelHyperparameterTuner:
     """
     Wraps sklearn GridSearchCV for systematic hyperparameter search.
     Returns plain dicts so results can be forwarded to MLflow later.
@@ -96,12 +145,13 @@ class HyperparameterTuner:
         self.grid_search: GridSearchCV | None = None
 
     def run_search(self, x_train: pd.DataFrame, y_train: pd.Series):
-        """Performs cross-validated grid search and returns the best estimator."""
+        """Performs time-series-aware cross-validated grid search."""
+        tscv = TimeSeriesSplit(n_splits=self.cv_folds)
         self.grid_search = GridSearchCV(
             estimator=self.estimator,
             param_grid=self.param_grid,
             scoring=self.scoring,
-            cv=self.cv_folds,
+            cv=tscv,
             n_jobs=-1,
         )
         self.grid_search.fit(x_train, y_train)
@@ -123,8 +173,8 @@ class HyperparameterTuner:
         }
 
 
-# --- Model Trainer ---
-class ModelTrainer:
+# --- Model Evaluation ---
+class ModelEvaluation:
     """
     Evaluates a fitted scikit-learn estimator on held-out data
     and persists the model, metrics, and config to disk.
@@ -182,28 +232,70 @@ class ModelTrainer:
             json.dump(metrics, f, indent=4)
 
 
+def run_model_training(
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    configs: list[tuple[str, object, dict]],
+) -> list[dict]:
+    """Based on the model config, tunes, evaluates, and returns collected results."""
+    results: list[dict] = []
+
+    for name, estimator, param_grid in configs:
+        logger.info(f"{'=' * 50}")
+        logger.info(f"Training model: {name}")
+
+        # Skip grid search when there are no hyperparameters to tune
+        if param_grid:
+            tuner = ModelHyperparameterTuner(
+                estimator=estimator,
+                param_grid=param_grid,
+                scoring="neg_mean_squared_error",
+            )
+            best_model = tuner.run_search(x_train, y_train)
+        else:
+            best_model = estimator
+            best_model.fit(x_train, y_train)
+
+        trainer = ModelEvaluation(model=best_model, model_name=name)
+        metrics = trainer.evaluate(x_test, y_test)
+
+        run_dir = trainer.save_run(identifier="80072ned", output_dir=DIR_MODELS)
+        trainer.save_metrics(metrics, run_dir)
+
+        results.append({"name": name, **metrics})
+
+    return results
+
+
+def log_model_metrics(results: list[dict]) -> None:
+    """Logs a ranked summary table so the best model is immediately visible."""
+    ranked = sorted(results, key=lambda row: row["r2"], reverse=True)
+
+    logger.info(f"\n{'=' * 70}")
+    logger.info("MODEL COMPARISON (ranked by R²)")
+    logger.info(f"{'Model':<25} {'R²':>8} {'MAE':>10} {'RMSE':>10} {'MSE':>12}")
+    logger.info("-" * 70)
+    for row in ranked:
+        logger.info(
+            f"{row['name']:<25} {row['r2']:>8.4f} {row['mae']:>10.4f} "
+            f"{row['rmse']:>10.4f} {row['mse']:>12.4f}"
+        )
+    logger.info("=" * 70)
+
+
 # --- Main execution ---
 if __name__ == "__main__":
-    from sklearn.ensemble import RandomForestRegressor
 
     # 1. Load Gold data
     dataset = DatasetLoader(db_path=DIR_DB_GOLD, table_name="80072ned_gold")
     x_train, x_test, y_train, y_test = dataset.load_and_split(target_column=ML_TARGET_COLUMN)
 
-    # 2. Hyperparameter tuning via cross-validated grid search
-    param_grid = {"n_estimators": [50, 100, 200], "max_depth": [5, 10, None]}
-    tuner = HyperparameterTuner(
-        estimator=RandomForestRegressor(random_state=42),
-        param_grid=param_grid,
-        scoring="neg_mean_squared_error",
+    # 2. Fit, evaluate, and persist each estimator in the estimator config
+    results = run_model_training(
+        x_train, y_train, x_test, y_test, MODEL_CONFIGS
     )
-    best_model = tuner.run_search(x_train, y_train)
-    tuning_summary = tuner.get_results_summary()
 
-    # 3. Evaluate best model on held-out test set
-    trainer = ModelTrainer(model=best_model, model_name="RandomForest")
-    metrics = trainer.evaluate(x_test, y_test)
-
-    # 4. Persist model, config, and metrics
-    run_dir = trainer.save_run(identifier="80072ned", output_dir=DIR_MODELS)
-    trainer.save_metrics(metrics, run_dir)
+    # 3. Log ranked comparison
+    log_model_metrics(results)
