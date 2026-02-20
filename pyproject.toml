@@ -10,7 +10,7 @@ dependencies = [
     "connectorx>=0.4.5",
     "ipykernel>=7.1.0",
     "pandas>=2.3.3",
+    "scikit-learn>=1.6.0",
     "polars>=1.38.0",
-    "pyarrow>=23.0.0",
     "sqlalchemy>=2.0.45",
 ]
