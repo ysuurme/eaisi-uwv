@@ -11,4 +11,5 @@ dependencies = [
     "scikit-learn>=1.6.0",
     "polars>=1.38.0",
     "sqlalchemy>=2.0.45",
+    "seaborn>=0.13.2",
 ]
