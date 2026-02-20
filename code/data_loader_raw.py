@@ -97,5 +97,5 @@ loader = CBSDataLoader(output_dir=DIR_DATA_RAW)
 
 loader.get_table_list()
 
-for table in CBS_TABLES_T3:
+for table in CBS_TABLES_T65:
     loader.get_table(table)

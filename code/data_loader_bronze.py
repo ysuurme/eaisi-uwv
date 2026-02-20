@@ -141,4 +141,5 @@ db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
 
 # Ingest data from 0_raw based on identifier and create db tables
 db.ingest_0_raw_folder("80072ned")
+db.ingest_0_raw_folder("83415NED")
 
