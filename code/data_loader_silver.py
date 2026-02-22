@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class DatabaseSilver:
     """
     Manages the SQLite database in the silver layer.
-    Joins Fact and Dimension tables from Bronze into a single wide table.
+    Joins Fact and Dimension tables from bronze into a single wide table.
     """
     def __init__(self, db_bronze_path: Path, db_silver_path: Path):
         self.db_bronze_path = db_bronze_path

@@ -20,7 +20,7 @@ CBS_TABLES_T65 = [
     # "85998NED", # Sick leave by gender and age                                                    ---------> Gender and age are sensitive topics let's skip it for the beginning
     # "86011NED", # Sick leave by origin and education level
     # "86168NED", # Absence duration by type of complaint/reason
-    
+
     ## Workplace Surveys & Working Conditions
     # "83156NED", # Sustainable employability by industry
     # "84434NED", # Sustainable employability by occupation
@@ -33,7 +33,7 @@ CBS_TABLES_T65 = [
     # "83158NED", # Occupational accidents by industry
     # "85718NED", # Work from home (Company Policy proxy)
     # "85786NED", # Weekly work-from-home hours
-    
+
     ## General Health & Lifestyle (Predictive Proxies)
     # "86047NED", # Labor participation and health status
     # "86067NED", # Health status of the labor force
@@ -43,7 +43,7 @@ CBS_TABLES_T65 = [
     # "81177eng", # Lifestyle and preventive screening
     # "81175eng", # Lifestyle factors by sex and age
     # "85647NED", # Health and labor barriers for the non-working population
-    
+
     ## Labor Market & Unemployment (Economic Pressure)
     # "80590ned", # Labor participation and unemployment per month
     # "85264NED", # General labor participation core figures
@@ -51,7 +51,7 @@ CBS_TABLES_T65 = [
     # "85312NED", # Unemployment duration (long-term unemployment trends)
     # "83752NED", # Long-term labor participation trends (since 1969)
     # "85271NED", # Average income and labor position
-    
+
     ## Industry-Specific Trends & Workforce Characteristics
     # "83583NED", # Jobs by industry (SBI 2008) and size
     # "83582NED", # Jobs by industry and region
@@ -66,20 +66,20 @@ CBS_TABLES_T65 = [
     # "85275NED", # Average working hours
     # "85276NED", # Occupational distribution
     # "85278NED", # Position in the work sphere (Fixed vs. Flexible contracts)
-    
+
     ## Healthcare Accessibility & Costs
     # "81178ENG", # Medical contacts, hospitalization, and medicine use
     # "82470NED", # Medical specialist care by diagnosis (DBCs)
     # "85544NED", # Healthcare expenditure by financing and function
     # "83700ENG", # Revenues of health care financing schemes
-    
+
     ## Macroeconomic Proxies (GDP & Regional Status)
     # "84432ENG", # Regional key figures (including GDP)
     # "71541eng", # Regional accounts (GDP per capita)
     # "82801ENG", # Regional National Accounts key figures
     # "86092NED", # Socio-economic status scores by neighborhood
     # "85900NED", # Socio-economic status (2023 index)
-    
+
     ## Labor Market & Workforce Dynamics (SBI 2008 & Contracts)
     # "84939NED", # Employment; jobs, wages, and hours; SBI 2008; region
     # "81414NED", # Jobs of employees; gender, age, and SBI 2008
@@ -100,3 +100,9 @@ CBS_TABLES_T65 = [
     # "84566NED", # Income of households; characteristics of households, region
     # "83738NED", # Income of persons; key figures by region
 ]
+
+# --- Model Storage ---
+DIR_MODELS = Path("models")
+
+# --- ML Target Column ---
+ML_TARGET_COLUMN = "Ziekteverzuimpercentage_1"
