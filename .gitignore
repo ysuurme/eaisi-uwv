@@ -18,3 +18,4 @@ wheels/
 # Workspace
 eaisi-uwv.code-workspace
 .env
+.claude/
