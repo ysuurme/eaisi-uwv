@@ -14,7 +14,7 @@ DIR_DB_GOLD = Path("data/3_gold/gold_data.db")
 CBS_TABLES_T65 = [
     ## Direct Sick Leave & Absence Data
     "80072ned", # Sick leave percentage by industry and size
-    # "83415NED", # Sick leave by working conditions
+    "83415NED", # Sick leave by working conditions
     # "86009NED", # Sick leave by industry and branch size
     # "86010NED", # Sick leave by occupation/profession
     # "85998NED", # Sick leave by gender and age                                                    ---------> Gender and age are sensitive topics let's skip it for the beginning
