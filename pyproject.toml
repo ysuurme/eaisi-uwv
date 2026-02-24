@@ -15,4 +15,5 @@ dependencies = [
     "pyarrow>=23.0.1",
     "missingno>=0.5.2",
     "ydata-profiling>=4.0.0",
+    "setuptools>=80.0.0",
 ]
