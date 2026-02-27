@@ -1,10 +1,13 @@
 from pathlib import Path
 
+# config.py is in code/, so .parent.parent climbs to project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # --- Data Directories ---
-DIR_DATA_RAW = Path("data/0_raw")
-DIR_DB_BRONZE = Path("data/1_bronze/bronze_data.db")
-DIR_DB_SILVER = Path("data/2_silver/silver_data.db")
-DIR_DB_GOLD = Path("data/3_gold/gold_data.db")
+DIR_DATA_RAW  = PROJECT_ROOT / "data" / "0_raw"
+DIR_DB_BRONZE = PROJECT_ROOT / "data" / "1_bronze" / "bronze_data.db"
+DIR_DB_SILVER = PROJECT_ROOT / "data" / "2_silver" / "silver_data.db"
+DIR_DB_GOLD   = PROJECT_ROOT / "data" / "3_gold"   / "gold_data.db"
 
 # --- CBS API Configurations ---
 # Top 3 most relevant CBS tables for sick leave prediction
