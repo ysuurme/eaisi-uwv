@@ -6,11 +6,11 @@ import logging
 from pathlib import Path
 
 # --- Third Party Libraries ---
-from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, select, insert
+from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, Float, select, insert
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3
+    from config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T65
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
@@ -103,6 +103,14 @@ class DatabaseSilver:
         candidates = ["Key", "DimensionKey", "ID", "Code"]
         return next((table.c[c] for c in candidates if c in table.c), None)
 
+    def _infer_column_type(self, value):
+        """Infer SQLAlchemy column type from a Python value."""
+        if isinstance(value, int):
+            return Integer
+        if isinstance(value, float):
+            return Float
+        return String
+
     def _save_to_silver(self, identifier, rows):
         """Handles table creation and bulk insertion into Silver layer."""
         silver_table_name = f"{identifier}_silver"
@@ -111,11 +119,14 @@ class DatabaseSilver:
         if silver_table_name in self.metadata_silver.tables:
             self.metadata_silver.remove(self.metadata_silver.tables[silver_table_name])
 
-        # Simple schema: Use columns from the first row of results. In a real scenario, you'd use your _infer_column_type logic here
+        # Infer column types from first non-None value per field
         cols = [Column("silver_id", Integer, primary_key=True, autoincrement=True)]
         for key in rows[0]._fields:
-            if key != "silver_id":
-                cols.append(Column(key, String)) # Simplifying to String for brevity
+            if key == "silver_id":
+                continue
+            sample_value = next((row._asdict()[key] for row in rows if row._asdict()[key] is not None), None)
+            col_type = self._infer_column_type(sample_value)
+            cols.append(Column(key, col_type))
 
         # Create and Load
         silver_table = Table(silver_table_name, self.metadata_silver, *cols, extend_existing=True)
@@ -132,5 +143,5 @@ class DatabaseSilver:
 db = DatabaseSilver(DIR_DB_BRONZE, DIR_DB_SILVER)
     
 # Process tables defined in config
-for table_id in CBS_TABLES_T3:
+for table_id in CBS_TABLES_T65:
     db.create_silver_table(table_id)
