@@ -2,14 +2,36 @@
 
 ## Table of Contents
 
-- [Getting Started](#getting-started)
+- [🚀 Quick Start](#quick-start)
 - [Project Structure](#project-structure)
 - [Project Contributions](#project-contributions)
 - [GitHub Flow](#github-flow)
 - [Project Management](#project-management)
 - [Data Management](#data-management)
 
-## Getting Started
+## 🚀 Quick Start
+
+### 1. Clone & Setup
+```bash
+git clone https://github.com/EAISI/eaisi-uwv.git
+cd eaisi-uwv
+# Sync dependencies using uv (https://astral.sh/uv)
+uv sync
+```
+
+### 2. Execute Pipeline
+Trigger the full "Train $\rightarrow$ Evaluate $\rightarrow$ Register" lifecycle for any gold table and model configuration.
+```bash
+# Default: 80072ned_gold, RandomForest, features=ALL
+uv run main.py  
+```
+
+### 3. Track Results (MLflow)
+The pipeline is "Zero-Artifact"; all results are stored in `data/4_eval/eval_data.db`. Launch the UI to view metrics, tuning grids, and model signatures.
+🌐 **Open**: [http://127.0.0.1:5000](http://127.0.0.1:5000)
+
+---
+**Note**: To auto-launch the UI during training, set `START_MLFLOW_UI = True` in `config.py`.
 
 This project is built using CPython 3.10.11 and dependencies are managed with UV. We use GitHub as our central hub for code management and project coordination. We use MLflow as a tool for managing the machine learning lifecycle.
 
