@@ -27,6 +27,26 @@ References:
 - **Bug Fix Branches**: `bugfix/*` - for bug fixes
 - **Documentation Branches**: `docs/*` - for documentation updates
 
+## Directory Layout
+
+```text
+eaisi-uwv/
+├── data/                       # Data storage (raw, medallion db's and MLFlow registry db)
+├── docs/                       # Documentation
+├── models/                     # Model artifacts
+├── notebooks/                  # Non-production experimentation
+│   ├── data_exploration/       # Data exploration and schema analysis
+│   └── ml_experimentation/     # ML experimentation and baseline models
+├── src/                        # Production-ready source code
+│   ├── data_engineering/       # Data Medallion Pipeline (Raw, Bronze, Silver, Gold)
+│   ├── ml_engineering/         # ML Lifecycle (Training, Evaluation, Registry, Orchestrator)
+│   ├── utils/                  # Shared utilities and database handlers
+│   └── config.py               # Project-wide configuration
+├── main.py                     # Entry point for product orchestration
+├── pyproject.toml              # Dependency management (UV)
+└── README.md                   # Project overview
+```
+
 ## Project Contributions
 
 We collaborate using GitHub as our central hub for code management and project coordination. All team members work together through:
@@ -141,17 +161,17 @@ This documentation outlines the architectural strategy for our machine learning 
 - Strategy: Collaborative exploratory data analysis and prototyping with tracked experiments for reproducibility of data, hyperparameters, and metrics.
 
 **Model Training**
-- Technology: Scikit-learn and PyTorch frameworks with support for custom runtimes.
+- Technology: Scikit-learn and PyTorch frameworks with optional support for XGBoost, LightGBM, Keras and TensorFlow.
 - Strategy: Scalable model development enabling efficient hyperparameter tuning, target optimization, and automated feature engineering.
 
 **Model Evaluation**
 - Technology: MLFlow for tracking and visualization, combined with evaluation datasets.
 - Strategy: Interactive and automated assessment of model effectiveness, including performance comparison, bias detection, and explainability analysis.
 
+**Model Registry**
+- Technology: Centralized MLFlow Model Registry through mlflow.log_artifact("model.pkl")
+- Strategy: Govern the full model lifecycle including versioning, metadata storage, documentation, and release management.
+
 **ML Pipelines**
 - Technology: Python-based orchestration and pipeline objects.
 - Strategy: Automate complex training and prediction workflows, triggering pipelines on-demand or on-schedule while capturing execution metadata.
-
-**Model Registry**
-- Technology: Centralized MLFlow Model Registry.
-- Strategy: Govern the full model lifecycle including versioning, metadata storage, documentation, and release management.
