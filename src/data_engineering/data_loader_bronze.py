@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, insert, MetaData, Table, Column, String, I
 
 # --- Configuration ---
 try:
-    from src.config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T3
+    from config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T3
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
@@ -136,9 +136,9 @@ class DatabaseBronze:
                 logger.error(f"Bulk insert failed for {table_name}: {e}")
 
 
-# --- Main execution ---
-db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
+if __name__ == "__main__":
+    db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
 
-# Process tables defined in config
-for table_id in CBS_TABLES_T3:
-    db.ingest_0_raw_folder(table_id)
+    # Process tables defined in config
+    for table_id in CBS_TABLES_T3:
+        db.ingest_0_raw_folder(table_id)

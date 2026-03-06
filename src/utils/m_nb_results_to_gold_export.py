@@ -6,7 +6,7 @@ import polars as pl
 from sqlalchemy import create_engine, inspect, text
 
 try:
-    from src.config import DIR_DB_GOLD
+    from config import DIR_DB_GOLD
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing 'DIR_DB_GOLD'.")
 

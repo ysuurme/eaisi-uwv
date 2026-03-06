@@ -9,7 +9,7 @@ import cbsodata
 
 # --- Configuration ---
 try:
-    from src.config import DIR_DATA_RAW, CBS_TABLES_T3, CBS_TABLES_T65
+    from config import DIR_DATA_RAW, CBS_TABLES_T3, CBS_TABLES_T65
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
@@ -92,10 +92,11 @@ class CBSDataLoader:
             raise
 
 
-# Ingest Raw Data
-loader = CBSDataLoader(output_dir=DIR_DATA_RAW)
+if __name__ == "__main__":
+    # Ingest Raw Data
+    loader = CBSDataLoader(output_dir=DIR_DATA_RAW)
 
-loader.get_table_list()
+    loader.get_table_list()
 
-for table in CBS_TABLES_T3:
-    loader.get_table(table)
+    for table in CBS_TABLES_T3:
+        loader.get_table(table)

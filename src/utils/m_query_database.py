@@ -48,7 +48,7 @@ def f_query_database(
 
     Examples
     --------
-    from src.config import DIR_DB_GOLD, DIR_DB_SILVER
+    from config import DIR_DB_GOLD, DIR_DB_SILVER
     from src.utils.m_query_database import f_query_database
 
     # Return a Polars DataFrame (default)

@@ -8,7 +8,7 @@ from sqlalchemy import MetaData, create_engine, text
 
 # --- Configuration ---
 try:
-    from src.config import DIR_DB_SILVER, DIR_DB_GOLD
+    from config import DIR_DB_SILVER, DIR_DB_GOLD
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
