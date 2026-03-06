@@ -20,7 +20,7 @@ from sqlalchemy import create_engine
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_GOLD, DIR_MODELS, ML_TARGET_COLUMN
+    from config import DIR_MODELS, ML_TARGET_COLUMN, DIR_DB_GOLD
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found or missing required variables.")
 
