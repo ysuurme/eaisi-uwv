@@ -5,6 +5,7 @@ Responsible for:
 - Training models with MLflow Tracking (Metadata in eval_data.db).
 - Capturing full Tuning Results as JSON in eval_data.db (No CSV files).
 """
+import os
 import json
 import logging
 import pandas as pd
@@ -25,8 +26,10 @@ try:
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found.")
 
-# Centralised MLflow tracking in eval_data.db
-mlflow.set_tracking_uri(f"sqlite:///{DIR_DB_EVAL}")
+# Force MLflow to use SQLite globally to prevent mlruns creation
+db_uri = f"sqlite:///{DIR_DB_EVAL}"
+os.environ["MLFLOW_TRACKING_URI"] = db_uri
+mlflow.set_tracking_uri(db_uri)
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +66,20 @@ class ModelTrainer:
     
     def __init__(self, experiment_name: str, db_eval_path: Path = DIR_DB_EVAL):
         self.experiment_name = experiment_name
-        self.engine_eval = create_engine(f"sqlite:///{db_eval_path}")
+        self.db_eval_path = db_eval_path
+        self.engine_eval = create_engine(f"sqlite:///{self.db_eval_path}")
+        
+        # Explicitly set experiment with DB-based artifact location to prevent mlruns creation
+        db_uri = f"sqlite:///{self.db_eval_path}"
+        mlflow.set_tracking_uri(db_uri)
+        
+        existing_exp = mlflow.get_experiment_by_name(self.experiment_name)
+        if existing_exp is None:
+            # Point artifacts to the DB path (MLflow will still try to write metadata there)
+            mlflow.create_experiment(name=self.experiment_name, artifact_location=db_uri)
+        
         mlflow.set_experiment(self.experiment_name)
+        
         # Autolog basic params and metrics, but skip models (we log them explicitly)
         mlflow.sklearn.autolog(log_models=False, log_datasets=True)
         self._init_db()
@@ -160,7 +175,8 @@ class ModelTrainer:
                 name="model", 
                 signature=signature, 
                 input_example=x_train.head(1),
-                conda_env=conda_env
+                conda_env=conda_env,
+                serialization_format="skops"
             )
 
             logger.info(f"✅ Training complete for {run_name}. Results stored in eval_data.db.")
