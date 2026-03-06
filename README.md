@@ -11,13 +11,14 @@
 
 ## Getting Started
 
-This project is built using CPython 3.10.11 and dependencies are managed with UV. We use GitHub as our central hub for code management and project coordination.
+This project is built using CPython 3.10.11 and dependencies are managed with UV. We use GitHub as our central hub for code management and project coordination. We use MLflow as a tool for managing the machine learning lifecycle.
 
 References:
 - UV CPython installation and dependency management: https://docs.astral.sh/uv/
 - Github docs: https://docs.github.com/
 - Project Structure: https://github.com/ysuurme/eaisi-uwv
 - Project Contributions: https://docs.github.com/en/get-started/using-github/github-flow
+- MLflow: https://mlflow.org/docs/latest/ml/getting-started/quickstart/
 
 ## Project Structure
 
@@ -102,7 +103,7 @@ We use a **GitHub Project** @project-eaisi-uwv to organize our work, track progr
 6. Move to `In Review` when the Pull Request is ready
 7. Move to `Done` after the Pull Request branch is merged to main
 
-## Data Management
+## Data Engineering
 This documentation outlines the architectural strategy for our data pipeline, utilizing a Mini-Medallion Architecture implemented with Python 3, SQLAlchemy Core & ORM, and SQLite3.
 The goal is to provide a lightweight, portable, and reproducible ELT (Extract, Load, Transform) framework for our machine learning project.
 
@@ -131,3 +132,26 @@ Excluded from Git (.gitignore) to prevent unnecessary data storage in the reposi
 - Strategy: Feature engineering and applying business logic by:
    - Aggregations: Calculating monthly averages or regional totals.
    - Feature Engineering: gold tables are structured as a Feature Store where each row represents a clean observation ready for model ingestion.
+
+## Machine Learning Engineering
+This documentation outlines the architectural strategy for our machine learning operations. We leverage **MLFlow** for experiment tracking, metric logging, and managing the model registry to ensure a robust MLOps lifecycle.
+
+**Experimentation**
+- Technology: Jupyter (.ipynb) notebooks integrated with Git and MLFlow.
+- Strategy: Collaborative exploratory data analysis and prototyping with tracked experiments for reproducibility of data, hyperparameters, and metrics.
+
+**Model Training**
+- Technology: Scikit-learn and PyTorch frameworks with support for custom runtimes.
+- Strategy: Scalable model development enabling efficient hyperparameter tuning, target optimization, and automated feature engineering.
+
+**Model Evaluation**
+- Technology: MLFlow for tracking and visualization, combined with evaluation datasets.
+- Strategy: Interactive and automated assessment of model effectiveness, including performance comparison, bias detection, and explainability analysis.
+
+**ML Pipelines**
+- Technology: Python-based orchestration and pipeline objects.
+- Strategy: Automate complex training and prediction workflows, triggering pipelines on-demand or on-schedule while capturing execution metadata.
+
+**Model Registry**
+- Technology: Centralized MLFlow Model Registry.
+- Strategy: Govern the full model lifecycle including versioning, metadata storage, documentation, and release management.
