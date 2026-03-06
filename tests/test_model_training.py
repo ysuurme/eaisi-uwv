@@ -12,7 +12,7 @@ class TestModelTraining(unittest.TestCase):
         self.target = "target_col"
         self.mock_df = pd.DataFrame({
             "Perioden_dt": pd.date_range("2020-01-01", periods=10, freq="ME"),
-            "feat1": range(10),
+            "feat1": [float(i) for i in range(10)],
             "target_col": [0.1 * i for i in range(10)],
             "silver_id": range(10)
         })

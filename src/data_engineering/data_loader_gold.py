@@ -76,51 +76,56 @@ class DatabaseGold:
 # --- Transformation Functions ---
 def transform_80072ned(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Cleans and reformats the 80072ned table.
+    Cleans and reformats the 80072ned table with a 'Zero-Null' policy.
+    Missing values in critical columns are now captured as soft errors in the Silver layer.
     """
     df = df.copy()
 
-    # 1. Reformat 'Ziekteverzuimpercentage_1' to float
+    # 1. Reformat Target to float64
     if 'Ziekteverzuimpercentage_1' in df.columns:
-        # Handle potential string formatting (Dutch commas)
         if df['Ziekteverzuimpercentage_1'].dtype == object:
             df['Ziekteverzuimpercentage_1'] = df['Ziekteverzuimpercentage_1'].str.replace(',', '.')
         df['Ziekteverzuimpercentage_1'] = pd.to_numeric(df['Ziekteverzuimpercentage_1'], errors='coerce')
 
-    # 2. Reformat 'Perioden' to datetime format per quarter
+    # 2. Temporal Processing
     if 'Perioden' in df.columns:
-        # Filter only quarters (KW)
         df = df[df['Perioden'].str.contains('KW', na=False)]
-        
         def parse_quarter(val):
-            # Expected format: YYYYKWQQ or YYYYKWQ
             parts = val.split('KW')
             if len(parts) == 2:
-                year = int(parts[0])
-                quarter = int(parts[1])
-                # Convert to datetime (start of quarter)
-                return pd.Timestamp(year=year, month=(quarter - 1) * 3 + 1, day=1)
+                return pd.Timestamp(year=int(parts[0]), month=(int(parts[1]) - 1) * 3 + 1, day=1)
             return pd.NaT
-
         df['Perioden_dt'] = df['Perioden'].apply(parse_quarter)
 
-    # 3. Reformat 'BedrijfskenmerkenSBI2008_CategoryGroupID' to numeric
+    # 3. Numeric Casting & Imputation
+    # SBI Category Group ID
     if 'BedrijfskenmerkenSBI2008_CategoryGroupID' in df.columns:
         df['BedrijfskenmerkenSBI2008_CategoryGroupID'] = pd.to_numeric(df['BedrijfskenmerkenSBI2008_CategoryGroupID'], errors='coerce')
 
-    # 4. One-hot encode 'BedrijfskenmerkenSBI2008'
+    # 4. One-hot Encoding (Explicitly fill NaNs with 0)
     if 'BedrijfskenmerkenSBI2008' in df.columns:
-        # Create dummies, prefixing with Bedrijfskenmerken 'SBI' for clarity, using 0/1 integers
         df = pd.get_dummies(df, columns=['BedrijfskenmerkenSBI2008'], prefix='SBI', dtype=int)
-
-    # 5. One-hot encode 'Perioden_Status'
+    
     if 'Perioden_Status' in df.columns:
         df = pd.get_dummies(df, columns=['Perioden_Status'], prefix='PeriodenStatus', dtype=int)
 
-    # Finally, drop unwanted columns
-    columns_to_drop = ["bronze_pk", "_source_file", "ID", "Perioden", "Perioden_Description", "Perioden_Title", "BedrijfskenmerkenSBI2008_Title", "BedrijfskenmerkenSBI2008_Description"]
+    # 5. --- GOLD QUALITY GATE ---
+    # Drop unwanted metadata columns
+    columns_to_drop = ["bronze_pk", "_source_file", "ID", "Perioden", "Perioden_Description", "Perioden_Title", 
+                       "BedrijfskenmerkenSBI2008_Title", "BedrijfskenmerkenSBI2008_Description"]
     df = df.drop(columns=columns_to_drop, errors='ignore')
 
+    # Mandatory: Drop rows where Target or Date is missing
+    df = df.dropna(subset=['Ziekteverzuimpercentage_1', 'Perioden_dt'])
+
+    # Mandatory: Impute remaining numeric NaNs with 0 (to ensure no missing data for MLflow)
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    df[numeric_cols] = df[numeric_cols].fillna(0)
+
+    # Mandatory: Cast all numeric columns to float64 to prevent MLflow Integer Schema errors
+    df[numeric_cols] = df[numeric_cols].astype('float64')
+
+    logger.info(f"Gold Quality Gate: Processed {len(df)} rows. 0 NaNs remain.")
     return df
 
 
