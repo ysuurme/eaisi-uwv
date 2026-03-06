@@ -10,6 +10,9 @@ DIR_DB_SILVER = PROJECT_ROOT / "data" / "2_silver" / "silver_data.db"
 DIR_DB_GOLD   = PROJECT_ROOT / "data" / "3_gold"   / "gold_data.db"
 DIR_DB_EVAL   = PROJECT_ROOT / "data" / "4_eval" / "eval_data.db"
 
+# --- Toggle Flags ---
+START_MLFLOW_UI = True # Set to True/False to auto-start MLflow UI in background
+
 # --- CBS API Configurations ---
 # Top 3 most relevant CBS tables for sick leave prediction
 CBS_TABLES_T3 = ["80072ned", "83415NED", "83157NED"]
@@ -34,5 +37,4 @@ DIR_MODELS = PROJECT_ROOT / "models"
 # --- ML Target Column ---
 ML_TARGET_COLUMN = "Ziekteverzuimpercentage_1"
 
-# --- Toggle Flags ---
-START_MLFLOW_UI = False # Set to True to auto-start MLflow UI in background
+

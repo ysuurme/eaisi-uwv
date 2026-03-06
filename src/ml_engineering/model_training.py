@@ -151,16 +151,37 @@ class ModelTrainer:
                 best_model = experiment.estimator
                 best_model.fit(x_train, y_train)
 
-            # --- ARTIFACT-FREE METADATA ---
-            # Capture essential metadata as JSON Tags (resides in SQLite DB)
+            # --- RESTORE UI VISIBILITY ---
+            # Explicit Model Logging (Enables Model Registry and UI visibility)
             signature = infer_signature(x_train, best_model.predict(x_train.head(5)))
-            env_spec = {"python": "3.10.11", "requirements": ["scikit-learn", "mlflow", "skops"]}
             
-            mlflow.set_tags({
-                "model_signature": json.dumps(signature.to_dict()),
-                "environment_spec": json.dumps(env_spec),
-                "input_example_sample": json.dumps(x_train.head(1).to_dict(orient='records'))
-            })
+            # Manual environment to bypass MLflow's failing pip discovery (solved via UV)
+            conda_env = {
+                "name": "eaisi-uwv-env",
+                "channels": ["conda-forge"],
+                "dependencies": [
+                    "python=3.10.11",
+                    {
+                        "pip": [
+                            "mlflow>=3.10.1",
+                            "scikit-learn>=1.6.0",
+                            "pandas>=2.3.3",
+                            "sqlalchemy>=2.0.45",
+                            "skops>=0.13.0"
+                        ]
+                    },
+                ],
+            }
 
-            logger.info(f"✅ Training complete for {run_name}. Zero artifacts created.")
+            # We use skops for the internal MLflow log as well to match our DB storage
+            mlflow.sklearn.log_model(
+                sk_model=best_model,
+                name="model",
+                signature=signature,
+                input_example=x_train.head(1),
+                conda_env=conda_env,
+                serialization_format="skops"
+            )
+
+            logger.info(f"✅ Training complete for {run_name}. Model logged to MLflow UI.")
             return best_model, run_id

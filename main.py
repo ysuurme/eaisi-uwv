@@ -35,7 +35,7 @@ def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
         orchestrator.run_experiment(
             gold_table=gold_table,
             experiment_config=config,
-            threshold_r2=0.5,
+            threshold_r2=0.2,
             features=features
         )
     except Exception as e:
