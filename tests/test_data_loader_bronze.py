@@ -4,8 +4,9 @@ from pathlib import Path
 from src.data_engineering.data_loader_bronze import DatabaseBronze
 
 class TestDataLoaderBronze(unittest.TestCase):
+    @patch("src.data_engineering.data_loader_bronze.Path.mkdir")
     @patch("src.data_engineering.data_loader_bronze.create_engine")
-    def setUp(self, mock_engine):
+    def setUp(self, mock_engine, mock_mkdir):
         self.raw_dir = Path("fake_raw")
         self.db_path = Path("fake_bronze.db")
         self.bronze = DatabaseBronze(self.raw_dir, self.db_path)

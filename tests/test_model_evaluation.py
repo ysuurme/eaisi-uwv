@@ -13,18 +13,18 @@ class TestModelEvaluation(unittest.TestCase):
         self.y_test = pd.Series([0.5, 0.6])
 
     @patch("src.ml_engineering.model_evaluation.mlflow")
-    @patch("src.ml_engineering.model_evaluation.ModelEvaluator._log_to_db")
-    def test_evaluate_candidate_pass(self, mock_log_db, mock_mlflow):
+    def test_evaluate_candidate_pass(self, mock_mlflow):
         mock_result = MagicMock()
         mock_result.metrics = {"r2_score": 0.8}
-        mock_mlflow.models.evaluate.return_value = mock_result
+        mock_mlflow.log_metrics.return_value = None
         
         # Use real estimator to allow pickling
-        # Fitting without names to align with DataFrame prediction in test
         model = LinearRegression()
-        model.fit(self.x_test.values, self.y_test.values)
+        model.fit(self.x_test, self.y_test)
 
+        mock_session = MagicMock()
         passed = self.evaluator.evaluate_candidate(
+            session=mock_session,
             run_id="run_123",
             best_model=model,
             x_test=self.x_test,
@@ -33,6 +33,7 @@ class TestModelEvaluation(unittest.TestCase):
             threshold_r2=0.5
         )
         self.assertTrue(passed)
+        mock_session.merge.assert_called()
 
 if __name__ == "__main__":
     unittest.main()

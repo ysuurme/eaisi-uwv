@@ -16,7 +16,9 @@ import mlflow
 import mlflow.sklearn
 from mlflow.models import infer_signature
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, String, DateTime
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+from sqlalchemy.sql import func
 
 from src.ml_engineering.model_configs import ModelExperiment
 
@@ -32,6 +34,19 @@ os.environ["MLFLOW_TRACKING_URI"] = db_uri
 mlflow.set_tracking_uri(db_uri)
 
 logger = logging.getLogger(__name__)
+
+# --- ORM Model Definitions ---
+class Base(DeclarativeBase):
+    pass
+
+class ModelTuningRecord(Base):
+    """ORM representation of hyperparameter tuning results."""
+    __tablename__ = "model_tuning_results"
+    
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    experiment_name: Mapped[str] = mapped_column(String)
+    cv_results_json: Mapped[str] = mapped_column(String)
+    timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
 class DatasetLoader:
     """Loads and splits Gold SQLite data with lineage tracking and float enforcement."""
@@ -96,16 +111,27 @@ class ModelTrainer:
             """))
             conn.commit()
 
-    def _log_tuning_to_db(self, run_id: str, cv_results: dict):
+    def _log_tuning_to_db(self, session: Session, run_id: str, cv_results: dict):
+        """Serialises and stores the full tuning grid in eval_data.db via ORM."""
         serializable_results = {k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in cv_results.items()}
-        with self.engine_eval.connect() as conn:
-            conn.execute(
-                text("INSERT OR REPLACE INTO model_tuning_results (run_id, experiment_name, cv_results_json) VALUES (:run_id, :experiment_name, :cv_results_json)"),
-                {"run_id": run_id, "experiment_name": self.experiment_name, "cv_results_json": json.dumps(serializable_results)}
-            )
-            conn.commit()
+        record = ModelTuningRecord(
+            run_id=run_id,
+            experiment_name=self.experiment_name,
+            cv_results_json=json.dumps(serializable_results)
+        )
+        session.merge(record)
+        session.flush()
 
-    def train_experiment(self, experiment: ModelExperiment, x_train: pd.DataFrame, y_train: pd.Series, run_name: str, lineage: Dict) -> Tuple[Any, str]:
+    def train_experiment(
+        self, 
+        session: Session,
+        experiment: ModelExperiment, 
+        x_train: pd.DataFrame, 
+        y_train: pd.Series, 
+        run_name: str, 
+        lineage: Dict
+    ) -> Tuple[Any, str]:
+        """Performs training within an active ORM Session."""
         with mlflow.start_run(run_name=run_name) as run:
             run_id = run.info.run_id
             mlflow.set_tags({"data_source": lineage["dataset"], "target": lineage["target"]})
@@ -116,7 +142,7 @@ class ModelTrainer:
                 grid_search = GridSearchCV(experiment.estimator, experiment.param_grid, cv=tscv, scoring="neg_mean_squared_error", n_jobs=-1)
                 grid_search.fit(x_train, y_train)
                 best_model = grid_search.best_estimator_
-                self._log_tuning_to_db(run_id, grid_search.cv_results_)
+                self._log_tuning_to_db(session, run_id, grid_search.cv_results_)
             else:
                 best_model = experiment.estimator
                 best_model.fit(x_train, y_train)

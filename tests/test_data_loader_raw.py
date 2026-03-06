@@ -4,7 +4,8 @@ from pathlib import Path
 from src.data_engineering.data_loader_raw import CBSDataLoader
 
 class TestDataLoaderRaw(unittest.TestCase):
-    def setUp(self):
+    @patch("src.data_engineering.data_loader_raw.Path.mkdir")
+    def setUp(self, mock_mkdir):
         self.output_dir = "fake_raw"
         self.loader = CBSDataLoader(self.output_dir)
 

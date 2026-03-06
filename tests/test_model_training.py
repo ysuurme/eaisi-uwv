@@ -32,8 +32,11 @@ class TestModelTraining(unittest.TestCase):
         trainer = ModelTrainer(experiment_name="test_exp")
         
         from sklearn.linear_model import LinearRegression
-        exp = ModelExperiment(name="test", estimator=LinearRegression(), param_grid={})
+        exp = ModelExperiment(name="test", estimator=LinearRegression(), param_grid={"copy_X": [True]})
+        
+        mock_session = MagicMock()
         best_model, run_id = trainer.train_experiment(
+            session=mock_session,
             experiment=exp,
             x_train=self.mock_df[["feat1"]],
             y_train=self.mock_df["target_col"],
@@ -41,6 +44,7 @@ class TestModelTraining(unittest.TestCase):
             lineage={"dataset": "test", "target": "target_col"}
         )
         self.assertEqual(run_id, "test_run")
+        mock_session.merge.assert_called()
 
 if __name__ == "__main__":
     unittest.main()
