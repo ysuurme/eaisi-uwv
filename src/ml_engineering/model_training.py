@@ -137,12 +137,30 @@ class ModelTrainer:
 
             # Explicit Model Logging (Must-have metadata)
             signature = infer_signature(x_train, best_model.predict(x_train.head(5)))
+            
+            # Manual environment to bypass MLflow's failing pip discovery (solved via UV)
+            conda_env = {
+                "name": "eaisi-uwv-env",
+                "channels": ["conda-forge"],
+                "dependencies": [
+                    "python=3.10.11",
+                    {
+                        "pip": [
+                            "mlflow>=3.10.1",
+                            "scikit-learn>=1.6.0",
+                            "pandas>=2.3.3",
+                            "sqlalchemy>=2.0.45"
+                        ]
+                    },
+                ],
+            }
+
             mlflow.sklearn.log_model(
                 sk_model=best_model, 
-                artifact_path="model", 
+                name="model", 
                 signature=signature, 
                 input_example=x_train.head(1),
-                conda_env=mlflow.pyfunc.get_default_conda_env()
+                conda_env=conda_env
             )
 
             logger.info(f"✅ Training complete for {run_name}. Results stored in eval_data.db.")

@@ -2,11 +2,11 @@
 Model Evaluator for the ML Layer.
 Responsible for:
 - Standardized benchmarks using mlflow.models.evaluate().
-- Persisting metrics AND model .pkl blobs to eval.db.
+- Persisting metrics AND model secure blobs (skops) to eval.db.
 - Gatekeeper logic for model registration.
 """
 import logging
-import pickle
+import skops.io as sio
 import pandas as pd
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -26,7 +26,7 @@ mlflow.set_tracking_uri(f"sqlite:///{DIR_DB_EVAL}")
 logger = logging.getLogger(__name__)
 
 class ModelEvaluator:
-    """Evaluates models and persists artifacts to eval.db."""
+    """Evaluates models and persists artifacts securely to eval.db."""
 
     def __init__(self, db_eval_path: Path = DIR_DB_EVAL):
         self.db_eval_path = db_eval_path
@@ -60,7 +60,7 @@ class ModelEvaluator:
         threshold_r2: float = 0.5
     ) -> bool:
         """
-        Runs mlflow.models.evaluate and persists results + pkl to eval.db.
+        Runs mlflow.models.evaluate and persists results + secure blob to eval.db.
         """
         model_uri = f"runs:/{run_id}/model"
         eval_data = x_test.copy()
@@ -83,10 +83,10 @@ class ModelEvaluator:
 
             passed_gate = r2 >= threshold_r2
             
-            # Serialize model to bytes
-            model_blob = pickle.dumps(best_model)
+            # Secure serialization using skops (addresses CVE-related pickle warnings)
+            model_blob = sio.dumps(best_model)
             
-            # Persist to eval.db (including the model itself)
+            # Persist to eval.db
             self._log_to_db(run_id, model_name, r2, mae, rmse, passed_gate, model_blob)
 
             logger.info(f"Gate: {'PASS' if passed_gate else 'FAIL'} (R2: {r2:.4f})")
