@@ -17,3 +17,6 @@ dependencies = [
     "mlflow>=3.10.1",
     "skops>=0.13.0",
 ]
+
+[project.scripts]
+mlflow-ui = "src.utils.m_mlflow_ui:start_server"

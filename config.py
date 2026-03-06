@@ -33,3 +33,6 @@ DIR_MODELS = PROJECT_ROOT / "models"
 
 # --- ML Target Column ---
 ML_TARGET_COLUMN = "Ziekteverzuimpercentage_1"
+
+# --- Toggle Flags ---
+START_MLFLOW_UI = False # Set to True to auto-start MLflow UI in background

@@ -4,8 +4,10 @@ Usage: python main.py <gold_table> <model_key>
 """
 import logging
 import sys
+from config import START_MLFLOW_UI
 from src.ml_engineering.model_configs import ModelRegistry
 from src.ml_engineering.model_orchestrator import ModelOrchestrator
+from src.utils.m_mlflow_ui import ensure_mlflow_ui
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -14,6 +16,9 @@ def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
     """
     Triggers the full ML lifecycle for a specific Gold table and estimator.
     """
+    if START_MLFLOW_UI:
+        ensure_mlflow_ui()
+        
     try:
         # Derive identifiers (e.g. "80072ned_gold" -> "80072ned")
         dataset_id = gold_table.replace("_gold", "")
