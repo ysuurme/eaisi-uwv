@@ -1,6 +1,59 @@
-def main():
-    print("Hello from eaisi-uwv!")
+"""
+Main Entry Point for EAISI UWV ML Pipeline.
+Usage: python main.py <gold_table> <model_key>
+"""
+import logging
+import sys
+from config import START_MLFLOW_UI
+from src.ml_engineering.model_configs import ModelRegistry
+from src.ml_engineering.model_orchestrator import ModelOrchestrator
+from src.utils.m_mlflow_ui import ensure_mlflow_ui
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
+    """
+    Triggers the full ML lifecycle for a specific Gold table and estimator.
+    """
+    if START_MLFLOW_UI:
+        ensure_mlflow_ui()
+        
+    try:
+        # Derive identifiers (e.g. "80072ned_gold" -> "80072ned")
+        dataset_id = gold_table.replace("_gold", "")
+        
+        # Fetch configuration and initialise orchestrator
+        config = ModelRegistry.get(model_key)
+        
+        orchestrator = ModelOrchestrator(
+            experiment_name=f"{dataset_id}_SickLeave",
+            model_name=f"{config.name}_{dataset_id}"
+        )
+        
+        # Execute pipeline
+        orchestrator.run_experiment(
+            gold_table=gold_table,
+            experiment_config=config,
+            threshold_r2=0.2,
+            features=features
+        )
+    except Exception as e:
+        logger.error(f"❌ Pipeline failed for table '{gold_table}' with model '{model_key}': {e}")
+        raise e
+
+def main():
+    # CLI Handling: python main.py <gold_table> <model_key> <features_csv>
+    gold_table = sys.argv[1] if len(sys.argv) > 1 else "80072ned_gold"
+    model_key = sys.argv[2] if len(sys.argv) > 2 else "random_forest"
+    features = sys.argv[3].split(",") if len(sys.argv) > 3 else None
+    
+    logger.info(f"🎯 Starting Pipeline | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}")
+    
+    try:
+        run_ml_pipeline(gold_table, model_key, features=features)
+    except Exception:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

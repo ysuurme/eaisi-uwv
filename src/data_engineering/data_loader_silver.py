@@ -107,11 +107,14 @@ class DatabaseSilver:
         """Handles table creation and bulk insertion into Silver layer."""
         silver_table_name = f"{identifier}_silver"
 
+        # --- SILVER VALIDATION GATE (Soft Error) ---
+        self._validate_silver_data(identifier, rows)
+
         # Drop if exists in metadata to avoid conflict
         if silver_table_name in self.metadata_silver.tables:
             self.metadata_silver.remove(self.metadata_silver.tables[silver_table_name])
 
-        # Simple schema: Use columns from the first row of results. In a real scenario, you'd use your _infer_column_type logic here
+        # Simple schema: Use columns from the first row of results.
         cols = [Column("silver_id", Integer, primary_key=True, autoincrement=True)]
         for key in rows[0]._fields:
             if key != "silver_id":
@@ -126,6 +129,27 @@ class DatabaseSilver:
             # Convert rows to dicts for insertion
             conn.execute(insert(silver_table), [row._asdict() for row in rows])
             logger.info(f"Successfully loaded {len(rows)} rows into {silver_table_name}")
+
+    def _validate_silver_data(self, identifier: str, rows: list):
+        """
+        Scans rows for missing data in critical columns and logs a soft error (warning).
+        """
+        critical_cols = ['Ziekteverzuimpercentage_1', 'Perioden']
+        missing_stats = {col: 0 for col in critical_cols}
+        
+        for row in rows:
+            row_dict = row._asdict()
+            for col in critical_cols:
+                if col in row_dict and (row_dict[col] is None or row_dict[col] == ''):
+                    missing_stats[col] += 1
+
+        for col, count in missing_stats.items():
+            if count > 0:
+                logger.warning(
+                    f"⚠️  SOFT ERROR: Missing data identified in Silver layer for '{identifier}'. "
+                    f"Column '{col}' has {count} missing values. "
+                    f"Gold layer expects complete data; check upstream Bronze/Raw sources."
+                )
 
 
 if __name__ == "__main__":
