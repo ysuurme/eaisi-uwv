@@ -36,14 +36,18 @@ class ModelOrchestrator:
         gold_table: str,
         experiment_config: Any,
         run_name: Optional[str] = None,
-        threshold_r2: float = 0.5
+        threshold_r2: float = 0.5,
+        features: Optional[List[str]] = None
     ):
         """Higher-level wrapper to run an experiment via a ModelExperiment object."""
         logger.info(f"🚀 Starting ML Pipeline for {self.model_name}...")
 
         # 1. Load Data
         loader = DatasetLoader(db_path=DIR_DB_GOLD, table_name=gold_table)
-        x_tr, x_te, y_tr, y_te, lineage = loader.load_and_split(target_column=ML_TARGET_COLUMN)
+        x_tr, x_te, y_tr, y_te, lineage = loader.load_and_split(
+            target_column=ML_TARGET_COLUMN,
+            features=features
+        )
 
         # 2. Train & Tune (SQLite Tracking + CV Logging)
         best_model, run_id = self.trainer.train_experiment(

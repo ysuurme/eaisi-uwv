@@ -20,8 +20,9 @@ class TestModelEvaluation(unittest.TestCase):
         mock_mlflow.models.evaluate.return_value = mock_result
         
         # Use real estimator to allow pickling
+        # Fitting without names to align with DataFrame prediction in test
         model = LinearRegression()
-        model.fit([[1], [2]], [0.5, 0.6])
+        model.fit(self.x_test.values, self.y_test.values)
 
         passed = self.evaluator.evaluate_candidate(
             run_id="run_123",
