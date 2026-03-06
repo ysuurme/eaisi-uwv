@@ -45,14 +45,24 @@ class ModelEvaluationRecord(Base):
     timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
 class ModelEvaluator:
-    """Evaluates models using ORM Sessions to prevent early 'hang-up' (e3q8)."""
+    """Evaluates models using ORM Sessions with high-concurrency SQLite settings."""
 
     def __init__(self, db_eval_path: Path = DIR_DB_EVAL):
-        self.engine = create_engine(f"sqlite:///{db_eval_path}")
+        self.db_eval_path = db_eval_path
+        # Use high timeout and WAL mode for concurrent MLflow + ORM access
+        self.engine = create_engine(
+            f"sqlite:///{self.db_eval_path}",
+            connect_args={"timeout": 30} 
+        )
         self._init_db()
 
     def _init_db(self):
-        """Ensures the schema is modern and matches the ORM model."""
+        """Ensures the evaluation table exists and WAL mode is enabled."""
+        # Enable WAL mode for concurrency
+        with self.engine.connect() as conn:
+            conn.execute(text("PRAGMA journal_mode=WAL"))
+            conn.commit()
+            
         Base.metadata.create_all(self.engine)
         # Migration check for model_blob (in case table was created with Core previously)
         with self.engine.connect() as conn:
@@ -104,7 +114,7 @@ class ModelEvaluator:
             
             # Merge ensures we handle existing run IDs gracefully
             session.merge(record)
-            session.flush() # Flush to DB but keep session open
+            session.commit() # Commit immediately to release SQLite write lock for MLflow
 
-            logger.info(f"Gate: {'PASS' if passed_gate else 'FAIL'} (R2: {r2:.4f}). Record flushed to Session.")
+            logger.info(f"Gate: {'PASS' if passed_gate else 'FAIL'} (R2: {r2:.4f}). Record committed to Session.")
             return passed_gate

@@ -28,11 +28,13 @@ class ModelOrchestrator:
         self.experiment_name = experiment_name
         self.model_name = model_name
         
-        self.trainer = ModelTrainer(experiment_name=self.experiment_name)
+        # Centralise the Evaluator first to reuse its engine
         self.evaluator = ModelEvaluator()
+        # Share the Evaluator's high-concurrency engine with the Trainer
+        self.trainer = ModelTrainer(experiment_name=self.experiment_name, engine=self.evaluator.engine)
         self.registry = ModelRegistry()
         
-        # Session factory
+        # Session factory using the Evaluator's high-concurrency engine
         self.Session = sessionmaker(bind=self.evaluator.engine)
 
     def run_experiment(

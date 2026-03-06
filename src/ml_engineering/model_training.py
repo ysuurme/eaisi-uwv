@@ -29,7 +29,7 @@ except ImportError:
     raise ImportError("Configuration file 'config.py' not found.")
 
 # Global enforcement of SQLite tracking
-db_uri = f"sqlite:///{DIR_DB_EVAL}"
+db_uri = f"sqlite:///{DIR_DB_EVAL}?timeout=30"
 os.environ["MLFLOW_TRACKING_URI"] = db_uri
 mlflow.set_tracking_uri(db_uri)
 
@@ -84,10 +84,14 @@ class DatasetLoader:
 class ModelTrainer:
     """Trains estimators with Zero-Artifact logging (Metadata only in DB)."""
     
-    def __init__(self, experiment_name: str, db_eval_path: Path = DIR_DB_EVAL):
+    def __init__(self, experiment_name: str, db_eval_path: Path = DIR_DB_EVAL, engine: Optional[Any] = None):
         self.experiment_name = experiment_name
         self.db_eval_path = db_eval_path
-        self.engine_eval = create_engine(f"sqlite:///{self.db_eval_path}")
+        # Use provided engine or create a new high-concurrency one
+        self.engine_eval = engine or create_engine(
+            f"sqlite:///{self.db_eval_path}",
+            connect_args={"timeout": 30}
+        )
         
         mlflow.set_tracking_uri(f"sqlite:///{self.db_eval_path}")
         # Ensure experiment exists in DB
@@ -120,7 +124,7 @@ class ModelTrainer:
             cv_results_json=json.dumps(serializable_results)
         )
         session.merge(record)
-        session.flush()
+        session.commit() # Commit immediately to release SQLite write lock for MLflow
 
     def train_experiment(
         self, 
