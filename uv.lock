@@ -640,6 +640,7 @@ dependencies = [
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "seaborn" },
+    { name = "skops" },
     { name = "sqlalchemy" },
     { name = "statsmodels" },
 ]
@@ -654,6 +655,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "scikit-learn", specifier = ">=1.6.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "skops", specifier = ">=0.13.0" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
     { name = "statsmodels", specifier = ">=0.14.6" },
 ]

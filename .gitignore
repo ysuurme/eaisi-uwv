@@ -1,8 +1,8 @@
 # raw data
 data/0_raw/*
 
-# trained models (binary, large)
-models/*
+# MLFlow trained models (binary, large)
+mlruns/
 
 # Python-generated files
 __pycache__/
@@ -16,8 +16,10 @@ wheels/
 .venv
 
 # Workspace
-eaisi-uwv.code-workspace
-agents.md
-GEMINI.md
 .env
+eaisi-uwv.code-workspace
+GEMINI.md
+
+
+
 
