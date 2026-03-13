@@ -17,11 +17,23 @@ dependencies = [
     "sqlalchemy>=2.0.45",
     "seaborn>=0.13.2",
     "pyarrow>=23.0.1",
+    "statsmodels>=0.14.6",
+    "mlflow>=3.10.1",
+    "skops>=0.13.0",
 ]
 
+<<<<<<< HEAD
 [tool.setuptools]
 <<<<<<< HEAD
 packages = ["code"]
 =======
 packages = ["code"]
 >>>>>>> 382097f7539cfb85b8fa4051573281fb940d242b
+=======
+[project.scripts]
+mlflow-ui = "src.utils.m_mlflow_ui:start_server"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+>>>>>>> fbba7e919996b8dbc36def8940d2df290b37f512
