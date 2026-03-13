@@ -17,6 +17,8 @@ git clone https://github.com/EAISI/eaisi-uwv.git
 cd eaisi-uwv
 # Sync dependencies using uv (https://astral.sh/uv)
 uv sync
+# Install project in editable mode to resolve imports
+uv pip install -e .
 ```
 
 ### 2. Execute Pipeline

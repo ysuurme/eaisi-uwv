@@ -20,3 +20,7 @@ dependencies = [
 
 [project.scripts]
 mlflow-ui = "src.utils.m_mlflow_ui:start_server"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
