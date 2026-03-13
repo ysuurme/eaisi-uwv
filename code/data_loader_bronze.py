@@ -139,6 +139,13 @@ class DatabaseBronze:
 # --- Main execution ---
 db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
 
+<<<<<<< HEAD
 # Process tables defined in config
 for table_id in CBS_TABLES_T3:
     db.ingest_0_raw_folder(table_id)
+=======
+# Ingest data from 0_raw based on identifier and create db tables
+db.ingest_0_raw_folder("80072ned")
+db.ingest_0_raw_folder("83415NED")
+
+>>>>>>> 382097f7539cfb85b8fa4051573281fb940d242b
