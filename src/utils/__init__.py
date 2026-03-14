@@ -29,3 +29,4 @@ __version__ = "1.0.0"
 from .m_nb_results_to_gold_export import f_nb_results_to_gold_export
 from .m_nb_results_to_gold_export import f_list_gold_tables
 from .m_query_database import f_query_database
+from .m_sbi_classifier import f_split_by_sbi
