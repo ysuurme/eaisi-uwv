@@ -98,5 +98,5 @@ if __name__ == "__main__":
 
     loader.get_table_list()
 
-    for table in CBS_TABLES_T3:
+    for table in CBS_TABLES_T65:
         loader.get_table(table)
