@@ -7,10 +7,7 @@ import pandas as pd
 from sqlalchemy import MetaData, create_engine, text
 
 # --- Configuration ---
-try:
-    from config import DIR_DB_SILVER, DIR_DB_GOLD
-except ImportError:
-    raise ImportError("Configuration file 'config.py' not found or missing required variables.")
+from src.config import DIR_DB_SILVER, DIR_DB_GOLD
 
 # --- Logging ---
 logging.basicConfig(

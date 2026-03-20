@@ -9,10 +9,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, select, insert
 
 # --- Configuration ---
-try:
-    from config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3
-except ImportError:
-    raise ImportError("Configuration file 'config.py' not found or missing required variables.")
+from src.config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3, CBS_TABLES_T65
 
 # --- Logging ---
 logging.basicConfig(
@@ -156,5 +153,5 @@ if __name__ == "__main__":
     db = DatabaseSilver(DIR_DB_BRONZE, DIR_DB_SILVER)
         
     # Process tables defined in config
-    for table_id in CBS_TABLES_T3:
+    for table_id in CBS_TABLES_T65:
         db.create_silver_table(table_id)
