@@ -1,5 +1,7 @@
 # raw data
 data/0_raw/*
+data/1_bronze/bronze_data.db
+data/2_silver/*
 
 # MLFlow trained models (binary, large)
 mlruns/
