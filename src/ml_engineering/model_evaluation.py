@@ -17,12 +17,13 @@ from sqlalchemy.sql import func
 
 # --- Configuration ---
 try:
-    from src.config import DIR_DB_EVAL
+    from src.config import DIR_DB_EVAL, PROJECT_ROOT
 except ImportError:
     raise ImportError("Configuration file 'src/config.py' not found.")
 
 # Centralised MLflow tracking
-mlflow.set_tracking_uri(f"sqlite:///{DIR_DB_EVAL}")
+rel_db_eval = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
+mlflow.set_tracking_uri(f"sqlite:///{rel_db_eval}")
 
 logger = logging.getLogger(__name__)
 

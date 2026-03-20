@@ -24,12 +24,13 @@ from src.ml_engineering.model_configs import ModelExperiment
 
 # --- Configuration ---
 try:
-    from src.config import DIR_DB_GOLD, ML_TARGET_COLUMN, DIR_DB_EVAL
+    from src.config import DIR_DB_GOLD, ML_TARGET_COLUMN, DIR_DB_EVAL, PROJECT_ROOT
 except ImportError:
     raise ImportError("Configuration file 'src/config.py' not found.")
 
 # Global enforcement of SQLite tracking
-db_uri = f"sqlite:///{DIR_DB_EVAL}?timeout=30"
+rel_db_eval = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
+db_uri = f"sqlite:///{rel_db_eval}?timeout=30"
 os.environ["MLFLOW_TRACKING_URI"] = db_uri
 mlflow.set_tracking_uri(db_uri)
 
@@ -93,10 +94,11 @@ class ModelTrainer:
             connect_args={"timeout": 30}
         )
         
-        mlflow.set_tracking_uri(f"sqlite:///{self.db_eval_path}")
+        rel_path = Path(self.db_eval_path).relative_to(PROJECT_ROOT).as_posix()
+        mlflow.set_tracking_uri(f"sqlite:///{rel_path}")
         # Ensure experiment exists in DB
         if not mlflow.get_experiment_by_name(self.experiment_name):
-            mlflow.create_experiment(self.experiment_name)
+            mlflow.create_experiment(self.experiment_name, artifact_location="./mlruns")
         mlflow.set_experiment(self.experiment_name)
         
         # Autolog params and metrics to DB, but strictly no artifacts

@@ -10,7 +10,7 @@ from pathlib import Path
 
 # --- Configuration ---
 try:
-    from src.config import DIR_DB_EVAL
+    from src.config import DIR_DB_EVAL, PROJECT_ROOT
 except ImportError:
     print("❌ Error: Could not find config.py in the src directory.")
     sys.exit(1)
@@ -22,8 +22,8 @@ def is_port_in_use(port: int = 5000) -> bool:
 
 def start_server():
     """Blocking call to start the MLflow server (for CLI usage)."""
-    db_path = Path(DIR_DB_EVAL).resolve()
-    backend_uri = f"sqlite:///{db_path}"
+    rel_db_path = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
+    backend_uri = f"sqlite:///{rel_db_path}"
     
     command = [
         "mlflow", "server",
@@ -49,8 +49,8 @@ def ensure_mlflow_ui():
         print("ℹ️  MLflow UI is already running on http://127.0.0.1:5000")
         return
 
-    db_path = Path(DIR_DB_EVAL).resolve()
-    backend_uri = f"sqlite:///{db_path}"
+    rel_db_path = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
+    backend_uri = f"sqlite:///{rel_db_path}"
     
     # Start as background process
     print("🚀 Launching MLflow UI in background...")
