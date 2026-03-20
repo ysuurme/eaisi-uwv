@@ -2,6 +2,14 @@
 data/0_raw/*
 data/1_bronze/*
 data/2_silver/*
+data/3_gold/*
+data/4_eval/*
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
 
 # MLFlow trained models (binary, large)
 mlruns/
@@ -21,7 +29,3 @@ wheels/
 .env
 eaisi-uwv.code-workspace
 GEMINI.md
-
-
-
-
