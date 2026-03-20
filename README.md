@@ -32,6 +32,12 @@ uv run main.py
 The pipeline is "Zero-Artifact"; all results are stored in `data/4_eval/eval_data.db`. Launch the UI to view metrics, tuning grids, and model signatures.
 🌐 **Open**: [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
+### 4. Run Tests
+Execute all unit and end-to-end tests across the project to verify everything is working correctly:
+```bash
+uv run python -m unittest discover -s tests
+```
+
 ---
 **Note**: To auto-launch the UI during training, set `START_MLFLOW_UI = True` in `config.py`.
 
