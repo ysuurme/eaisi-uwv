@@ -8,13 +8,8 @@ from pathlib import Path
 # --- Third Party Libraries ---
 from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, select, insert
 
-from config import CBS_TABLES_T65
-
 # --- Configuration ---
-try:
-    from config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3
-except ImportError:
-    raise ImportError("Configuration file 'config.py' not found or missing required variables.")
+from src.config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3, CBS_TABLES_T65
 
 # --- Logging ---
 logging.basicConfig(

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-# config.py is in the project root
-PROJECT_ROOT = Path(__file__).resolve().parent
+# config.py is in the src directory
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # --- Data Directories ---
 DIR_DATA_RAW  = PROJECT_ROOT / "data" / "0_raw"
@@ -115,5 +115,3 @@ DIR_MODELS = PROJECT_ROOT / "models"
 
 # --- ML Target Column ---
 ML_TARGET_COLUMN = "Ziekteverzuimpercentage_1"
-
-

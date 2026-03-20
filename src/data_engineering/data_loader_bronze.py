@@ -7,10 +7,7 @@ from sqlalchemy import create_engine, insert, MetaData, Table, Column, String, I
 
 
 # --- Configuration ---
-try:
-    from config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T65
-except ImportError:
-    raise ImportError("Configuration file 'config.py' not found or missing required variables.")
+from src.config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T65
 
 
 # --- Logging ---

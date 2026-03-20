@@ -4,7 +4,7 @@ Usage: python main.py <gold_table> <model_key>
 """
 import logging
 import sys
-from config import START_MLFLOW_UI
+from src.config import START_MLFLOW_UI
 from src.ml_engineering.model_configs import ModelRegistry
 from src.ml_engineering.model_orchestrator import ModelOrchestrator
 from src.utils.m_mlflow_ui import ensure_mlflow_ui

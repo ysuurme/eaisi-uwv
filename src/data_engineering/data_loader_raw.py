@@ -8,10 +8,7 @@ import cbsodata
 
 
 # --- Configuration ---
-try:
-    from config import DIR_DATA_RAW, CBS_TABLES_T3, CBS_TABLES_T65
-except ImportError:
-    raise ImportError("Configuration file 'config.py' not found or missing required variables.")
+from src.config import DIR_DATA_RAW, CBS_TABLES_T3, CBS_TABLES_T65
 
 """
 Based on the attributes provided and the metadata from the cbs_table_list.json, these are the most relevant tables for predicting sick leave.
