@@ -10,9 +10,9 @@ from pathlib import Path
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_EVAL
+    from src.config import DIR_DB_EVAL
 except ImportError:
-    print("❌ Error: Could not find config.py in the project root.")
+    print("❌ Error: Could not find config.py in the src directory.")
     sys.exit(1)
 
 def is_port_in_use(port: int = 5000) -> bool:

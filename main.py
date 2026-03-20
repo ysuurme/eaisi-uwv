@@ -4,10 +4,17 @@ Usage: python main.py <gold_table> <model_key>
 """
 import logging
 import sys
-from src.config import START_MLFLOW_UI
-from src.ml_engineering.model_configs import ModelRegistry
-from src.ml_engineering.model_orchestrator import ModelOrchestrator
-from src.utils.m_mlflow_ui import ensure_mlflow_ui
+
+# --- Local Application Imports ---
+try:
+    from src.config import START_MLFLOW_UI
+    from src.ml_engineering.model_configs import ModelRegistry
+    from src.ml_engineering.model_orchestrator import ModelOrchestrator
+    from src.utils.m_mlflow_ui import ensure_mlflow_ui
+except ImportError as e:
+    print(f"❌ Error importing local modules: {e}")
+    print("Ensure you are running from the project root and have run 'uv pip install -e .'")
+    sys.exit(1)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

@@ -17,9 +17,9 @@ from sqlalchemy.sql import func
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_EVAL
+    from src.config import DIR_DB_EVAL
 except ImportError:
-    raise ImportError("Configuration file 'config.py' not found.")
+    raise ImportError("Configuration file 'src/config.py' not found.")
 
 # Centralised MLflow tracking
 mlflow.set_tracking_uri(f"sqlite:///{DIR_DB_EVAL}")

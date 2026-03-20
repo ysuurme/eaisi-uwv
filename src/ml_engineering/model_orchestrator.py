@@ -15,9 +15,9 @@ from src.ml_engineering.model_registry import ModelRegistry
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_GOLD, ML_TARGET_COLUMN, DIR_DB_EVAL
+    from src.config import DIR_DB_GOLD, ML_TARGET_COLUMN, DIR_DB_EVAL
 except ImportError:
-    raise ImportError("Configuration file 'config.py' not found.")
+    raise ImportError("Configuration file 'src/config.py' not found.")
 
 logger = logging.getLogger(__name__)
 
