@@ -2,7 +2,6 @@
 Main Entry Point for EAISI UWV ML Pipeline.
 Usage: python main.py <gold_table> <model_key>
 """
-import logging
 import sys
 
 # --- Local Application Imports ---
@@ -11,34 +10,29 @@ try:
     from src.ml_engineering.model_configs import ModelRegistry
     from src.ml_engineering.model_orchestrator import ModelOrchestrator
     from src.utils.m_mlflow_ui import ensure_mlflow_ui
+    from src.utils.m_log import setup_logging, f_log
 except ImportError as e:
-    print(f"❌ Error importing local modules: {e}")
+    print(f"Error importing local modules: {e}")
     print("Ensure you are running from the project root and have run 'uv pip install -e .'")
     sys.exit(1)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+setup_logging()
+
 
 def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
-    """
-    Triggers the full ML lifecycle for a specific Gold table and estimator.
-    """
+    """Triggers the full ML lifecycle for a specific Gold table and estimator."""
     if START_MLFLOW_UI:
         ensure_mlflow_ui()
-        
+
     try:
-        # Derive identifiers (e.g. "80072ned_gold" -> "80072ned")
         dataset_id = gold_table.replace("_gold", "")
-        
-        # Fetch configuration and initialise orchestrator
         config = ModelRegistry.get(model_key)
-        
+
         orchestrator = ModelOrchestrator(
             experiment_name=f"{dataset_id}_SickLeave",
             model_name=f"{config.name}_{dataset_id}"
         )
-        
-        # Execute pipeline
+
         orchestrator.run_experiment(
             gold_table=gold_table,
             experiment_config=config,
@@ -46,17 +40,17 @@ def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
             features=features
         )
     except Exception as e:
-        logger.error(f"❌ Pipeline failed for table '{gold_table}' with model '{model_key}': {e}")
+        f_log(f"Pipeline failed for table '{gold_table}' with model '{model_key}': {e}", c_type="error")
         raise e
 
+
 def main():
-    # CLI Handling: python main.py <gold_table> <model_key> <features_csv>
     gold_table = sys.argv[1] if len(sys.argv) > 1 else "80072ned_gold"
     model_key = sys.argv[2] if len(sys.argv) > 2 else "random_forest"
     features = sys.argv[3].split(",") if len(sys.argv) > 3 else None
-    
-    logger.info(f"🎯 Starting Pipeline | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}")
-    
+
+    f_log(f"Starting Pipeline | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}", c_type="start")
+
     try:
         run_ml_pipeline(gold_table, model_key, features=features)
     except Exception:

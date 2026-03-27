@@ -1,31 +1,16 @@
 import json
-import logging
 from pathlib import Path
-
 
 # --- Third Party Libraries ---
 import cbsodata
 
-
 # --- Configuration ---
 from src.config import DIR_DATA_RAW, CBS_TABLES_T3, CBS_TABLES_T65
 
-"""
-Based on the attributes provided and the metadata from the cbs_table_list.json, these are the most relevant tables for predicting sick leave.
-Example CBS table IDs can be found at https://github.com/J535D165/cbsodata/blob/main/README.md
-"""
-
 # --- Logging ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%H:%M:%S"
-)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from src.utils.m_log import f_log
 
 
-# --- Data ingestion to "Data Lake" 0_raw ---
 class CBSDataLoader:
     """
     Responsible for retrieving data from CBS Open Data and storing it as raw JSON. It is an industry standard to save the raw JSON first, 
@@ -41,7 +26,7 @@ class CBSDataLoader:
     def _file_exists(self, file_dir: Path) -> bool:
         """Checks if a file directory already exists."""
         if file_dir.exists():
-            logger.info(f"File '{file_dir}' already exists, data not fetched.")
+            f_log(f"File '{file_dir}' already exists, data not fetched.")
             return True
 
     
@@ -52,7 +37,7 @@ class CBSDataLoader:
         
         try:
             tables = cbsodata.get_table_list()
-            logger.info(f"Fetched {len(tables)} tables from CBS.")
+            f_log(f"Fetched {len(tables)} tables from CBS.", c_type="success")
             table_info = [
                 {
                     "Identifier": table['Identifier'],
@@ -64,11 +49,11 @@ class CBSDataLoader:
             output_path = Path(self.output_dir, "cbs_table_list.json")
             with open(output_path, 'w') as f:
                 json.dump(table_info, f, indent=4)
-            logger.info(f"Saved table list to: {output_path}")
+            f_log(f"Saved table list to: {output_path}", c_type="store")
             return tables
         
         except Exception as e:
-            logger.error(f"Failed to fetch table list: {e}")
+            f_log(f"Failed to fetch table list: {e}", c_type="error")
             return []
 
 
@@ -79,21 +64,18 @@ class CBSDataLoader:
             return
        
         try:
-            logger.debug(f"Getting data for table '{table_id}'...")
+            f_log(f"Getting data for table '{table_id}'...", c_type="debug")
             data = cbsodata.get_data(table_id, dir=output_dir_table)
-            logger.info(f"Successfully saved table with {len(data)} records to {output_dir_table}")
+            f_log(f"Saved table with {len(data)} records to {output_dir_table}", c_type="store")
             return output_dir_table
         
         except Exception as e:
-            logger.error(f"Failed to save data for table '{table_id}': {e}")
+            f_log(f"Failed to save data for table '{table_id}': {e}", c_type="error")
             raise
 
 
 if __name__ == "__main__":
-    # Ingest Raw Data
     loader = CBSDataLoader(output_dir=DIR_DATA_RAW)
-
     loader.get_table_list()
-
     for table in CBS_TABLES_T65:
         loader.get_table(table)

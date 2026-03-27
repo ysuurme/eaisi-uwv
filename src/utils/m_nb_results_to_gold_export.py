@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +6,8 @@ from sqlalchemy import create_engine, inspect, text
 
 from src.config import DIR_DB_GOLD
 
-logger = logging.getLogger(__name__)
+# --- Logging ---
+from src.utils.m_log import f_log
 
 
 def f_nb_results_to_gold_export(
@@ -68,7 +68,7 @@ def f_nb_results_to_gold_export(
     # --- Verify gold DB exists ---
     if not DIR_DB_GOLD.exists():
         raise FileNotFoundError(
-            f"❌ Gold database not found at {DIR_DB_GOLD}. "
+            f"Gold database not found at {DIR_DB_GOLD}. "
             "Run data_loader_gold.py first to initialise the database."
         )
 
@@ -87,8 +87,7 @@ def f_nb_results_to_gold_export(
             dtype=dtype_map,
         )
         n_rows = len(df_pd)
-        logger.info(f"✅ Exported {n_rows} rows to table '{table_name}' in {gold_path}")
-        print(f"✅ Exported {n_rows} rows → '{table_name}' ({gold_path.name})")
+        f_log(f"Exported {n_rows} rows to table '{table_name}' in {gold_path}", c_type="store")
 
     except Exception as e:
         raise RuntimeError(f"Failed to export '{table_name}' to gold DB: {e}") from e
@@ -103,7 +102,7 @@ def f_list_gold_tables() -> list[str]:
     Useful for a quick sanity check after exporting.
     """
     if not DIR_DB_GOLD.exists():
-        print(f"⚠️  Gold database does not exist yet at {DIR_DB_GOLD}")
+        f_log(f"Gold database does not exist yet at {DIR_DB_GOLD}", c_type="warning")
         return []
 
     engine = create_engine(f"sqlite:///{DIR_DB_GOLD}")

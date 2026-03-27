@@ -2,8 +2,6 @@
 Purpose:    Reusable utility to query a SQLite database and return either a
             Polars or Pandas DataFrame.
 """
-
-import logging
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +9,8 @@ import pandas as pd
 import polars as pl
 from sqlalchemy import create_engine
 
-logger = logging.getLogger(__name__)
+# --- Logging ---
+from src.utils.m_log import f_log
 
 
 def f_query_database(
@@ -73,7 +72,7 @@ def f_query_database(
 
     if not db_path.exists():
         raise FileNotFoundError(
-            f"❌ Database not found at {db_path}. "
+            f"Database not found at {db_path}. "
             "Ensure the correct path is passed and the database has been initialised."
         )
 
@@ -86,12 +85,12 @@ def f_query_database(
             else:
                 df = pd.read_sql_query(query, conn)
 
-        logger.info(f"✅ Query returned {len(df)} rows from {db_path.name} as {return_type} DataFrame")
+        f_log(f"Query returned {len(df)} rows from {db_path.name} as {return_type} DataFrame", c_type="success")
         return df
 
     except Exception as e:
         raise RuntimeError(
-            f"❌ Query failed on {db_path.name}: {e}"
+            f"Query failed on {db_path.name}: {e}"
         ) from e
 
     finally:

@@ -6,11 +6,12 @@ Responsible for:
 - Metadata enrichment (Tags, Descriptions).
 - Retrieving models using the 2026 URI standard.
 """
-import logging
 import mlflow
 from mlflow.tracking import MlflowClient
 
-logger = logging.getLogger(__name__)
+# --- Logging ---
+from src.utils.m_log import f_log
+
 
 class ModelRegistry:
     """Handles model lifecycle and governance in MLflow."""
@@ -27,11 +28,8 @@ class ModelRegistry:
     ) -> str:
         """Registers a model version from a run."""
         model_uri = f"runs:/{run_id}/model"
-        
-        # 1. Register the model
         model_version = mlflow.register_model(model_uri, model_name)
         
-        # 2. Enrich Metadata
         if tags:
             for key, val in tags.items():
                 self.client.set_model_version_tag(
@@ -48,7 +46,6 @@ class ModelRegistry:
                 description=description
             )
             
-        logger.info(f"✅ Model registered: {model_name} v{model_version.version}")
         return model_version.version
 
     def promote_to_alias(self, model_name: str, version: str, alias: str = "prod"):
@@ -58,7 +55,7 @@ class ModelRegistry:
             alias=alias,
             version=version
         )
-        logger.info(f"🚀 Version {version} of {model_name} promoted to @{alias}")
+
 
     def get_model_uri(self, model_name: str, alias: str = "prod") -> str:
         """Returns the centralized URI for a given model and alias."""
@@ -70,6 +67,5 @@ class ModelRegistry:
         return versions[0].version if versions else None
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    registry = ModelRegistry()
-    # registry.register_candidate(...)
+    from src.utils.m_log import setup_logging
+    setup_logging()
