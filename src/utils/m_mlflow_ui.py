@@ -36,9 +36,8 @@ def start_server():
         "--host", "127.0.0.1"
     ]
     
-    f_log("Starting MLflow UI...", c_type="start")
-    f_log(f"Database: {DIR_DB_EVAL}")
-    f_log("URL: http://127.0.0.1:5000")
+    
+    f_log(f"Starting MLflow UI | http://127.0.0.1:5000", c_type="start")
     
     try:
         subprocess.run(command, check=True)
@@ -50,7 +49,7 @@ def start_server():
 def ensure_mlflow_ui():
     """Starts MLflow UI in the background if not already running."""
     if is_port_in_use(5000):
-        f_log("MLflow UI is already running on http://127.0.0.1:5000")
+        f_log("MLflow UI is already running | http://127.0.0.1:5000", c_type="success")
         return
 
     rel_db_path = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
