@@ -21,11 +21,20 @@ uv sync
 uv pip install -e .
 ```
 
-### 2. Execute Pipeline
-Trigger the full "Train $\rightarrow$ Evaluate $\rightarrow$ Register" lifecycle for any gold table and model configuration.
+### 2. Execute Orchestration Pipeline
+The `main.py` entrypoint serves as the holistic orchestrator for both Data Engineering and Machine Learning.
+
+**To run the Machine Learning lifecycle only:**
+Trigger the "Train $\rightarrow$ Evaluate $\rightarrow$ Register" lifecycle directly on pre-existing gold tables.
 ```bash
 # Default: 80072ned_gold, RandomForest, features=ALL
 uv run main.py  
+```
+
+**To refresh the underlying Data Pipeline *before* ML execution:**
+Append the `--refresh-data` flag to natively execute the full Medallion architecture (Raw $\rightarrow$ Bronze $\rightarrow$ Silver $\rightarrow$ Gold) ensuring all enabled `config.py` metrics are perfectly synced before the Machine Learning process takes over.
+```bash
+uv run main.py --refresh-data
 ```
 
 ### 3. Track Results (MLflow)

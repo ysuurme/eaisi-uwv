@@ -52,6 +52,9 @@ def ensure_mlflow_ui():
         f_log("MLflow UI is already running | http://127.0.0.1:5000", c_type="success")
         return
 
+    # Auto-create the UI directory physically if the Data store was completely wiped natively
+    Path(DIR_DB_EVAL).parent.mkdir(parents=True, exist_ok=True)
+    
     rel_db_path = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
     backend_uri = f"sqlite:///{rel_db_path}"
     
