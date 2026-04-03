@@ -115,3 +115,9 @@ DIR_MODELS = PROJECT_ROOT / "models"
 
 # --- ML Target Column ---
 ML_TARGET_COLUMN = "Ziekteverzuimpercentage_1"
+
+# --- Logging ---
+LOG_PROFILE = "PRD"          # "PRD" | "TEST" | "DEBUG"
+LOG_SEPARATOR_WIDTH = 80
+LOG_LINE_WIDTH = 120
+DIR_LOG = PROJECT_ROOT / "log"

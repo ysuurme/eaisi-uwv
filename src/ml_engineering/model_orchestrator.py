@@ -5,7 +5,6 @@ Ties together:
 2. Evaluation (mlflow.models.evaluate, .pkl persistence in eval.db)
 3. Governance (Alias-based promotion)
 """
-import logging
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -19,7 +18,9 @@ try:
 except ImportError:
     raise ImportError("Configuration file 'src/config.py' not found.")
 
-logger = logging.getLogger(__name__)
+# --- Logging ---
+from src.utils.m_log import f_log
+
 
 class ModelOrchestrator:
     """Orchestrates the full ML lifecycle with a persistent Session (Unit of Work)."""
@@ -28,9 +29,7 @@ class ModelOrchestrator:
         self.experiment_name = experiment_name
         self.model_name = model_name
         
-        # Centralise the Evaluator first to reuse its engine
         self.evaluator = ModelEvaluator()
-        # Share the Evaluator's high-concurrency engine with the Trainer
         self.trainer = ModelTrainer(experiment_name=self.experiment_name, engine=self.evaluator.engine)
         self.registry = ModelRegistry()
         
@@ -46,7 +45,7 @@ class ModelOrchestrator:
         features: Optional[List[str]] = None
     ):
         """Executes the pipeline within a single persistent Session."""
-        logger.info(f"🚀 Starting ML Pipeline for {self.model_name}...")
+        f_log(f"Starting ML Pipeline for {self.model_name}...", c_type="start")
 
         with self.Session() as session:
             try:
@@ -80,7 +79,7 @@ class ModelOrchestrator:
 
                 # 4. Finalise Unit of Work
                 session.commit()
-                logger.info("Unit of Work committed successfully.")
+                f_log("Unit of Work committed successfully.")
 
                 # 5. Register & Promote (Metadata-only API)
                 if passed_gate:
@@ -91,18 +90,20 @@ class ModelOrchestrator:
                         description=f"Model {self.model_name} passed gate on {gold_table}."
                     )
                     self.registry.promote_to_alias(self.model_name, version, alias="prod")
-                    logger.info("🎉 Pipeline completed: Model is Production (@prod).")
+                    f_log(f"Model registered | {self.model_name} v{version} -> @prod", c_type="register")
+                    f_log("Pipeline completed | Model is Production", c_type="complete")
                 else:
-                    logger.warning("🚫 Pipeline halted: Model did not meet the quality gate.")
+                    f_log("Pipeline halted | Model did not meet the quality gate", c_type="gate_fail")
             
             except Exception as e:
                 session.rollback()
-                logger.error(f"Pipeline failed. Session rolled back: {e}")
+                f_log(f"Pipeline failed. Session rolled back: {e}", c_type="error")
                 raise e
 
 if __name__ == "__main__":
     from src.ml_engineering.model_configs import ModelRegistry as ConfigRegistry
-    logging.basicConfig(level=logging.INFO)
+    from src.utils.m_log import setup_logging
+    setup_logging()
     
     orch = ModelOrchestrator("80072ned_SickLeave", "RF_SickLeave")
     orch.run_experiment(
