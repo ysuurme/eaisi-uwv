@@ -107,7 +107,7 @@ if __name__ == "__main__":
     
     orch = ModelOrchestrator("80072ned_SickLeave", "RF_SickLeave")
     orch.run_experiment(
-        gold_table="80072ned_gold",
+        gold_table="master_data_ml_preprocessed",
         experiment_config=ConfigRegistry.get("random_forest"),
         threshold_r2=0.0
     )
