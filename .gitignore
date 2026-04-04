@@ -22,6 +22,8 @@ wheels/
 
 # Workspace
 .env
+.github
 eaisi-uwv.code-workspace
 GEMINI.md
 TODO.md
+Taskfile.yml
