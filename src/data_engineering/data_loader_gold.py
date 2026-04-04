@@ -67,6 +67,127 @@ class DatabaseGold:
             f_log(f"Error transforming/storing {silver_table_name}: {e}", c_type="error")
             return
 
+    def create_master_training_dataset(self, target_prefix: str = "80072ned") -> pd.DataFrame:
+        """
+        Synthesizes the Gold Layer into a unified SBI-granular Master Training Matrix.
+
+        Tiered Join Strategy (Broadcast Dimension Pattern):
+        - Tier 1 (SBI-specific): Feature has 'BedrijfstakkenBranchesSBI2008'
+                                 -> join on [period_enddate, SBI_COL]. Enables branch-level predictions.
+        - Tier 2 (Broadcast):    Feature lacks 'BedrijfstakkenBranchesSBI2008'
+                                 -> join on [period_enddate] only. The single national value is
+                                    broadcast (replicated) across all SBI branch rows for that quarter.
+                                    Assumption: national-level features (e.g. stress=1.0) apply uniformly
+                                    to every sector until SBI-specific data becomes available.
+
+        The full SBI-granular master table is preserved (~4393 rows). The raw SBI_COL is reconstructed
+        from its OHE representation in the target table to re-enable Tier 1 composite joins.
+        """
+        ALL_SECTORS_KEY = "T001081"
+        SBI_COL = "BedrijfstakkenBranchesSBI2008"
+        DATE_COL = "period_enddate"
+        target_table_name = f"{target_prefix}_gold"
+
+        f_log(f"Starting master dataset creation with target: {target_table_name}", c_type="process")
+
+        with self.engine.connect() as conn:
+            # 1. Load full SBI-granular target DataFrame
+            try:
+                query = f"SELECT * FROM \"{target_table_name}\""
+                master_df = pd.read_sql_query(query, conn)
+            except Exception as e:
+                f_log(f"Failed to load target table {target_table_name}: {e}", c_type="error")
+                return pd.DataFrame()
+
+            if master_df.empty:
+                f_log("Master target dataframe is empty. Aborting master integration.", c_type="error")
+                return master_df
+
+            # Reconstruct raw SBI_COL from OHE columns so Tier 1 joins are possible.
+            # OHE in transform_target_fact_table replaces the raw column with binary flags per value.
+            ohe_prefix = f"{SBI_COL}_"
+            ohe_cols = [c for c in master_df.columns if c.startswith(ohe_prefix)]
+            if ohe_cols and SBI_COL not in master_df.columns:
+                master_df[SBI_COL] = master_df[ohe_cols].idxmax(axis=1).str.replace(ohe_prefix, "", regex=False)
+                f_log(f"Reconstructed '{SBI_COL}' from {len(ohe_cols)} OHE columns.", c_type="process")
+            elif SBI_COL not in master_df.columns:
+                # The gold table pre-dates OHE or was stored without SBI columns.
+                # All feature joins will fall back to Tier 2 (Broadcast). Re-run data_loader_gold.py to fix.
+                f_log(f"WARNING: '{SBI_COL}' not found in target and no OHE columns detected. "
+                      "All joins will be Tier 2 (Broadcast). Re-run data_loader_gold.py to regenerate gold tables.", c_type="warning")
+
+            sbi_count = master_df[SBI_COL].nunique() if SBI_COL in master_df.columns else 0
+            f_log(f"Master target loaded: {len(master_df)} rows across {sbi_count} unique SBI branches.", c_type="process")
+
+
+            # 2. Identify all Feature Tables (exclude output table to prevent self-join)
+            try:
+                tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+            except Exception as e:
+                f_log(f"Failed reading sqlite_master: {e}", c_type="error")
+                return master_df
+
+            # Only tables with _gold suffix are joined; master_data_ml has no _gold suffix so is naturally excluded.
+            excluded = {target_table_name}
+            feature_tables = [t for t in tables['name'].tolist() if t.endswith("_gold") and t not in excluded]
+
+            # 3. Tiered Feature Merge (Broadcast Dimension Pattern)
+            # Track join tiers for the end-of-run summary report
+            sbi_joined: list[str] = []
+            broadcast_joined: list[str] = []
+
+            for table in feature_tables:
+                f_log(f"Evaluating feature table for join: {table}", c_type="process")
+                try:
+                    feature_df = pd.read_sql_query(f"SELECT * FROM \"{table}\"", conn)
+
+                    if DATE_COL not in feature_df.columns:
+                        f_log(f"Skipping {table}: missing '{DATE_COL}', cannot align temporally.", c_type="warning")
+                        continue
+
+                    has_sbi = SBI_COL in feature_df.columns
+                    active_keys = [DATE_COL, SBI_COL] if has_sbi else [DATE_COL]
+                    tier_label = "Tier 1 (SBI-specific)" if has_sbi else "Tier 2 (Broadcast)"
+                    f_log(f"{tier_label} join selected for: {table}", c_type="info")
+
+                    # Preemptive overlap dropping to prevent _x/_y suffixes
+                    overlap = set(feature_df.columns).intersection(set(master_df.columns)) - set(active_keys)
+                    if overlap:
+                        overlap_list = sorted(list(overlap))
+                        f_log(f"Soft Log: Dropping overlap {overlap_list} from incoming table: {table}", c_type="info")
+                        feature_df = feature_df.drop(columns=overlap_list)
+
+                    initial_rows = len(master_df)
+                    master_df = pd.merge(master_df, feature_df, on=active_keys, how="left")
+
+                    f_log(f"Joined {table}: +{len(feature_df.columns) - len(active_keys)} features.", c_type="success")
+                    if len(master_df) != initial_rows:
+                        f_log(f"WARNING: Cartesian explosion detected! Rows shifted {initial_rows} -> {len(master_df)}.", c_type="warning")
+
+                    if has_sbi:
+                        sbi_joined.append(table)
+                    else:
+                        broadcast_joined.append(table)
+
+                except Exception as e:
+                    f_log(f"Error processing feature table {table}: {e}", c_type="error")
+
+        # Join Summary Report — gives engineers immediate visibility into which
+        # CBS tables still need a SBI_COL dimension added for sub-sector precision.
+        f_log("--- Master Join Summary ---", c_type="info")
+        f_log(f"Tier 1 (SBI-specific, {len(sbi_joined)} tables): {sbi_joined or 'None'}", c_type="info")
+        f_log(f"Tier 2 (Broadcast/no SBI, {len(broadcast_joined)} tables — ADD SBI DIMENSION): {broadcast_joined or 'None'}", c_type="warning")
+
+        # 4. Storage Persistence
+        try:
+            master_df.to_sql("master_data_ml", self.engine, if_exists="replace", index=False)
+            f_log("Stored master_data_ml successfully.", c_type="store")
+        except Exception as e:
+            f_log(f"Failed to save master_data_ml: {e}", c_type="error")
+
+        f_log(f"Completed master dataset creation. Final shape: {master_df.shape}", c_type="complete")
+        return master_df
+
 
 def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataFrame:
     """
@@ -222,3 +343,6 @@ if __name__ == "__main__":
             db.process_silver_table(table_id, TRANSFORMATION_REGISTRY[table_id])
         else:
             f_log(f"Setup Warning: Transformation logic not registered for target table: {table_id}", c_type="warning")
+            
+    # Synthesize Master Dataset
+    db.create_master_training_dataset()
