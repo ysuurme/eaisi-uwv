@@ -21,11 +21,20 @@ uv sync
 uv pip install -e .
 ```
 
-### 2. Execute Pipeline
-Trigger the full "Train $\rightarrow$ Evaluate $\rightarrow$ Register" lifecycle for any gold table and model configuration.
+### 2. Execute Orchestration Pipeline
+The `main.py` entrypoint serves as the holistic orchestrator for both Data Engineering and Machine Learning.
+
+**To run the Machine Learning lifecycle only:**
+Trigger the "Train $\rightarrow$ Evaluate $\rightarrow$ Register" lifecycle directly on pre-existing gold tables.
 ```bash
 # Default: 80072ned_gold, RandomForest, features=ALL
 uv run main.py  
+```
+
+**To refresh the underlying Data Pipeline *before* ML execution:**
+Append the `--refresh-data` flag to natively execute the full Medallion architecture (Raw $\rightarrow$ Bronze $\rightarrow$ Silver $\rightarrow$ Gold) ensuring all enabled `config.py` metrics are perfectly synced before the Machine Learning process takes over.
+```bash
+uv run main.py --refresh-data
 ```
 
 ### 3. Track Results (MLflow)
@@ -178,10 +187,12 @@ Excluded from Git (.gitignore) to prevent unnecessary data storage in the reposi
    - Enrichment: Performing JOIN operations between Facts and Dimensions to replace cryptic codes (e.g., GM9001) with human-readable titles (Bonaire).
 
 **Gold: The "Business/ML Zone"**; our third structured representation that provides clean features for analysis and ML training.
-- Technology: SQLite3 database inserts via SQLAlchemy ORM (better for complex logic).
-- Strategy: Feature engineering and applying business logic by:
-   - Aggregations: Calculating monthly averages or regional totals.
-   - Feature Engineering: gold tables are structured as a Feature Store where each row represents a clean observation ready for model ingestion.
+- Technology: SQLite3 database inserts via SQLAlchemy ORM.
+- Strategy: Feature engineering, strict temporal standardization, and explicit Star Schema ML configuration:
+   - **Target Data (Fact Tables)**: We conceptually do not want foundational dimensions (like Branches) pivoted under any circumstances for Target datasets (e.g., `80072ned`). Your model predicts sick leave *per branch*. This means your ML algorithm needs discrete row objects natively modeled around the specific `(Quarter, Branch)` composite key so it can scale iterations appropriately!
+   - **Feature Data (Dimension Tables)**: Purely observational feature datasets (e.g., `85916NED`, `85920NED`) are dynamically flattened (pivoted) across their demographic properties to enforce exactly 1 row per Quarter natively. This ensures they can `Left Join` seamlessly onto the Fact table without triggering Cartesian data explosions.
+   - **Structural Joins**: Identifying keys (like SBI Branches) within feature tables are mathematically preserved as vertical indices alongside Time, guaranteeing flawless index merging against the specific target rows.
+   - **Data Quality Gates**: Zero-Null policies are enforced automatically via interpolation routines, ensuring the Data Store evaluates exactly to machine-learning constraints natively prior to execution.
 
 ## Machine Learning Engineering
 This documentation outlines the architectural strategy for our machine learning operations. We leverage **MLFlow** for experiment tracking, metric logging, and managing the model registry to ensure a robust MLOps lifecycle.

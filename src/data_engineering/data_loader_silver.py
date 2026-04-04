@@ -125,9 +125,10 @@ class DatabaseSilver:
         for col, count in missing_stats.items():
             if count > 0:
                 f_log(
-                    f"SOFT ERROR: Missing data in Silver layer for '{identifier}'. "
-                    f"Column '{col}' has {count} missing values. "
-                    f"Gold layer expects complete data; check upstream Bronze/Raw sources.",
+                    f"SOFT ERROR/WARNING: Missing data detected in '{identifier}'. "
+                    f"Column '{col}' is missing {count} values. "
+                    f"Note: Machine Learning algorithms fundamentally cannot train on imputed/synthetic target labels (y) without causing catastrophic model hallucination. "
+                    f"The Gold Pipeline seamlessly intercepts and permanently drops these rows from the Fact Table before they reach the ML Orchestrator.",
                     c_type="warning",
                 )
 

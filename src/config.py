@@ -31,7 +31,7 @@ CBS_TABLES_T65 = [
     ## Workplace Surveys & Working Conditions
     # "83156NED", # Sustainable employability by industry
     # "84434NED", # Sustainable employability by occupation
-    # "83157NED", # Psychosocial work load (PSA) by industry
+    "83157NED", # Psychosocial work load (PSA) by industry
     # "84436NED", # Psychosocial work load (PSA) by occupation
     # "83159NED", # Physical work load by industry
     # "84435NED", # Physical work load by occupation

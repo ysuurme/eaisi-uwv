@@ -50,6 +50,11 @@ class ModelEvaluator:
 
     def __init__(self, db_eval_path: Path = DIR_DB_EVAL):
         self.db_eval_path = db_eval_path
+        
+        # Ensure the evaluation data directory exists so SQLite doesn't crash structurally
+        if isinstance(self.db_eval_path, Path):
+            self.db_eval_path.parent.mkdir(parents=True, exist_ok=True)
+            
         self.engine = create_engine(
             f"sqlite:///{self.db_eval_path}",
             connect_args={"timeout": 30} 
