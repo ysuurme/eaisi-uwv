@@ -178,14 +178,29 @@ class DatabaseGold:
         f_log(f"Tier 1 (SBI-specific, {len(sbi_joined)} tables): {sbi_joined or 'None'}", c_type="info")
         f_log(f"Tier 2 (Broadcast/no SBI, {len(broadcast_joined)} tables — ADD SBI DIMENSION): {broadcast_joined or 'None'}", c_type="warning")
 
-        # 4. Storage Persistence
+        # 4. Storage Persistence (joined, pre-imputation)
         try:
-            master_df.to_sql("master_data_ml", self.engine, if_exists="replace", index=False)
-            f_log("Stored master_data_ml successfully.", c_type="store")
+            master_df.to_sql("master_data_ml_joined", self.engine, if_exists="replace", index=False)
+            f_log("Stored master_data_ml_joined successfully.", c_type="store")
         except Exception as e:
-            f_log(f"Failed to save master_data_ml: {e}", c_type="error")
+            f_log(f"Failed to save master_data_ml_joined: {e}", c_type="error")
 
-        f_log(f"Completed master dataset creation. Final shape: {master_df.shape}", c_type="complete")
+        f_log(f"Completed master dataset join. Shape: {master_df.shape}", c_type="complete")
+
+        # 5. Preprocessing Gate: validate → impute → validate → persist
+        from src.ml_engineering.model_preprocess import validate_master_dataset, impute_missing_values
+
+        validate_master_dataset(master_df, stage="raw")
+        preprocessed_df = impute_missing_values(master_df)
+        validate_master_dataset(preprocessed_df, stage="clean")
+
+        try:
+            preprocessed_df.to_sql("master_data_ml_preprocessed", self.engine, if_exists="replace", index=False)
+            f_log("Stored master_data_ml_preprocessed successfully.", c_type="store")
+        except Exception as e:
+            f_log(f"Failed to save master_data_ml_preprocessed: {e}", c_type="error")
+
+        f_log(f"Completed full preprocessing pipeline. Final shape: {preprocessed_df.shape}", c_type="complete")
         return master_df
 
 
