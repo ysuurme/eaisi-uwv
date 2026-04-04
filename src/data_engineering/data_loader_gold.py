@@ -103,18 +103,32 @@ class DatabaseGold:
                 f_log("Master target dataframe is empty. Aborting master integration.", c_type="error")
                 return master_df
 
+            # Ensure consistent nomenclature for the target table
+            master_df = apply_gold_baseline(master_df, ML_TARGET_COLUMN)
+
             # Reconstruct raw SBI_COL from OHE columns so Tier 1 joins are possible.
             # OHE in transform_target_fact_table replaces the raw column with binary flags per value.
-            ohe_prefix = f"{SBI_COL}_"
-            ohe_cols = [c for c in master_df.columns if c.startswith(ohe_prefix)]
+            # CBS uses several naming variants for the SBI dimension — try them all.
+            sbi_ohe_prefixes = [
+                f"{SBI_COL}_",
+                "BedrijfstakkenSBI2008_",
+                "Bedrijfstakken_SBI2008_",
+                "SBI2008_",
+            ]
+            ohe_prefix = None
+            ohe_cols = []
+            for candidate_prefix in sbi_ohe_prefixes:
+                ohe_cols = [c for c in master_df.columns if c.startswith(candidate_prefix)]
+                if ohe_cols:
+                    ohe_prefix = candidate_prefix
+                    break
+
             if ohe_cols and SBI_COL not in master_df.columns:
                 master_df[SBI_COL] = master_df[ohe_cols].idxmax(axis=1).str.replace(ohe_prefix, "", regex=False)
-                f_log(f"Reconstructed '{SBI_COL}' from {len(ohe_cols)} OHE columns.", c_type="process")
+                f_log(f"Reconstructed '{SBI_COL}' from {len(ohe_cols)} OHE columns (prefix: '{ohe_prefix}').", c_type="process")
             elif SBI_COL not in master_df.columns:
-                # The gold table pre-dates OHE or was stored without SBI columns.
-                # All feature joins will fall back to Tier 2 (Broadcast). Re-run data_loader_gold.py to fix.
                 f_log(f"WARNING: '{SBI_COL}' not found in target and no OHE columns detected. "
-                      "All joins will be Tier 2 (Broadcast). Re-run data_loader_gold.py to regenerate gold tables.", c_type="warning")
+                      "All feature joins will fall back to Tier 2 (Broadcast).", c_type="warning")
 
             sbi_count = master_df[SBI_COL].nunique() if SBI_COL in master_df.columns else 0
             f_log(f"Master target loaded: {len(master_df)} rows across {sbi_count} unique SBI branches.", c_type="process")
@@ -145,10 +159,20 @@ class DatabaseGold:
                         f_log(f"Skipping {table}: missing '{DATE_COL}', cannot align temporally.", c_type="warning")
                         continue
 
-                    has_sbi = SBI_COL in feature_df.columns
+                    # Tier 1 requires SBI on BOTH the feature table AND the master table
+                    has_sbi = SBI_COL in feature_df.columns and SBI_COL in master_df.columns
                     active_keys = [DATE_COL, SBI_COL] if has_sbi else [DATE_COL]
                     tier_label = "Tier 1 (SBI-specific)" if has_sbi else "Tier 2 (Broadcast)"
                     f_log(f"{tier_label} join selected for: {table}", c_type="info")
+
+                    # Guard: Tier 2 tables with multiple rows per date must be aggregated
+                    # to prevent Cartesian explosions (N_master × N_feature per quarter).
+                    if not has_sbi and feature_df.duplicated(subset=[DATE_COL]).any():
+                        numeric_feature_cols = feature_df.select_dtypes(include="number").columns.tolist()
+                        pre_agg_rows = len(feature_df)
+                        feature_df = feature_df.groupby(DATE_COL, as_index=False)[numeric_feature_cols].mean()
+                        f_log(f"Aggregated {table} from {pre_agg_rows} -> {len(feature_df)} rows "
+                              f"(mean across sectors) to prevent Cartesian explosion.", c_type="warning")
 
                     # Preemptive overlap dropping to prevent _x/_y suffixes
                     overlap = set(feature_df.columns).intersection(set(master_df.columns)) - set(active_keys)
@@ -252,7 +276,19 @@ def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataF
     
     df = df.drop(columns=cols_to_drop, errors='ignore')
 
-    # Drop NaNs on specific crucial identifier 
+    # 4. Normalize SBI Column Nomenclature
+    # Standardizes various CBS sector column names into a project-wide structural key consistent for joins.
+    sbi_variants = ['BedrijfstakkenSBI2008', 'Bedrijfstakken_SBI2008', 'SBI2008', 'BedrijfstakkenBranches_SBI2008']
+    target_sbi = 'BedrijfstakkenBranchesSBI2008'
+    
+    if target_sbi not in df.columns:
+        for variant in sbi_variants:
+            if variant in df.columns:
+                df = df.rename(columns={variant: target_sbi})
+                f_log(f"Normalized structural key '{variant}' -> '{target_sbi}'", c_type="process")
+                break
+
+    # 5. Drop NaNs on specific crucial identifier 
     if 'period_enddate' in df.columns:
         df = df.dropna(subset=['period_enddate'])
 

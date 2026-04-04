@@ -56,13 +56,21 @@ def validate_master_dataset(
     f_log(f"✅ '{DATE_COL}' column present.", c_type="success")
 
     # 2. Duplicate key rows
-    key_cols = [DATE_COL, SBI_COL] if SBI_COL in df.columns else [DATE_COL]
+    has_full_key = SBI_COL in df.columns
+    key_cols = [DATE_COL, SBI_COL] if has_full_key else [DATE_COL]
     duplicate_count = df.duplicated(subset=key_cols).sum()
     if duplicate_count > 0:
-        raise ValueError(
-            f"{duplicate_count} duplicate rows detected on key columns {key_cols}."
-        )
-    f_log(f"✅ No duplicate key rows ({key_cols}).", c_type="success")
+        if has_full_key:
+            # Full composite key available but still duplicates → real data issue
+            raise ValueError(
+                f"{duplicate_count} duplicate rows detected on composite key {key_cols}."
+            )
+        # Date-only key: duplicates are expected (multiple SBI sectors per quarter)
+        f_log(f"⚠️ {duplicate_count} duplicate rows on {key_cols}. "
+              f"Expected: multiple SBI sectors share the same date key.",
+              c_type="warning")
+    else:
+        f_log(f"✅ No duplicate key rows ({key_cols}).", c_type="success")
 
     # 3. Missing-value assessment
     total_nulls = df.isna().sum().sum()
@@ -84,14 +92,15 @@ def validate_master_dataset(
             )
         f_log("✅ Zero missing values confirmed.", c_type="success")
 
-    # 4. Float64 enforcement (clean stage only)
+    # 4. Float64 enforcement (clean stage only, excludes structural keys)
     if stage == "clean":
-        non_float = [c for c in df.columns if df[c].dtype != np.float64]
+        feature_cols = [c for c in df.columns if c not in (DATE_COL, SBI_COL)]
+        non_float = [c for c in feature_cols if df[c].dtype != np.float64]
         if non_float:
             raise ValueError(
                 f"Columns not float64: {non_float[:10]}{'...' if len(non_float) > 10 else ''}"
             )
-        f_log("✅ All columns are float64.", c_type="success")
+        f_log("✅ All feature columns are float64.", c_type="success")
 
     f_log(f"✅ Validation gate [{stage.upper()}] passed. Shape: {df.shape}", c_type="success")
     return df
@@ -133,6 +142,12 @@ def impute_missing_values(
     f_log(f"Starting imputation. Input shape: {result.shape}, "
           f"total NaNs: {result.isna().sum().sum()}", c_type="process")
 
+    # 0. Extract structural keys — these are the dataset's spine, not features
+    structural_keys = [c for c in [DATE_COL, SBI_COL] if c in result.columns]
+    key_data = result[structural_keys].copy() if structural_keys else None
+    result = result.drop(columns=structural_keys, errors="ignore")
+    f_log(f"Preserved {len(structural_keys)} structural keys: {structural_keys}", c_type="info")
+
     # 1. Capture missing-indicator flags BEFORE any imputation
     if add_missing_indicator:
         cols_with_nans = result.columns[result.isna().any()].tolist()
@@ -173,8 +188,12 @@ def impute_missing_values(
                                 if c.replace("_is_missing", "") in result.columns]
         result = pd.concat([result, missing_flags[surviving_indicators]], axis=1)
 
-    # 7. Cast everything to float64 (MLflow / Gold Policy)
+    # 7. Cast feature columns to float64 (MLflow / Gold Policy)
     result = result.astype("float64")
+
+    # 8. Re-attach structural keys at the front of the DataFrame
+    if key_data is not None:
+        result = pd.concat([key_data.reset_index(drop=True), result.reset_index(drop=True)], axis=1)
 
     f_log(f"Imputation complete. Output shape: {result.shape}, "
           f"remaining NaNs: {result.isna().sum().sum()}", c_type="success")

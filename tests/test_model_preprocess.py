@@ -117,13 +117,21 @@ class TestValidation(unittest.TestCase):
             validate_master_dataset(df, stage="clean")
         self.assertIn("NaN", str(ctx.exception))
 
-    def test_validate_catches_duplicate_keys(self) -> None:
-        """Validation raises ValueError on duplicate key rows."""
+    def test_validate_raw_allows_duplicates(self) -> None:
+        """Validation soft-warns on date-only duplicates (SBI absent)."""
         df = _make_numeric_only_df(include_nans=False)
-        # Create a duplicate row by repeating index 0
         df_dup = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+        # Should NOT raise — no SBI column means date-only duplicates are expected
+        returned = validate_master_dataset(df_dup, stage="raw")
+        self.assertIsNotNone(returned)
+
+    def test_validate_catches_composite_key_duplicates(self) -> None:
+        """Validation raises ValueError when full composite key has duplicates."""
+        df = _make_synthetic_df(include_nans=False)
+        df_dup = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+        # SBI column IS present → composite key duplicates are a real error
         with self.assertRaises(ValueError) as ctx:
-            validate_master_dataset(df_dup, stage="raw")
+            validate_master_dataset(df_dup, stage="clean")
         self.assertIn("duplicate", str(ctx.exception).lower())
 
 
