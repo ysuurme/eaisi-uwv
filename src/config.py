@@ -63,7 +63,7 @@ CBS_TABLES_T65 = [
     ## Industry-Specific Trends & Workforce Characteristics
     # "83583NED", # Jobs by industry (SBI 2008) and size
     # "83582NED", # Jobs by industry and region
-    # "85917NED", # Labor volume by industry and age
+    "85917NED", # Labor volume by industry and age
     "85918NED", # Labor volume by industry and gender
     "85919NED", # Labor volume by industry and national accounts
     "85920NED", # Labor volume by industry (quarterly)
