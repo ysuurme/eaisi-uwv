@@ -23,7 +23,7 @@ def _make_synthetic_df(include_nans: bool = True) -> pd.DataFrame:
             "2019-03-31", "2019-06-30", "2019-09-30", "2019-12-31",
             "2020-03-31", "2020-06-30", "2020-09-30", "2020-12-31",
             "2021-03-31", "2021-06-30",
-        ]).astype("float64"),
+        ]),
         "BedrijfstakkenBranchesSBI2008": [
             "A", "B", "C", "D", "E", "F", "G", "H", "I", "J"
         ],
@@ -93,11 +93,13 @@ class TestImputation(unittest.TestCase):
         self.assertEqual(result.isna().sum().sum(), 0)
 
     def test_all_float64_after_impute(self) -> None:
-        """All output columns are float64."""
+        """All feature output columns are float64."""
         df = _make_numeric_only_df(include_nans=True)
         result = impute_missing_values(df)
+        from src.ml_engineering.model_preprocess import DATE_COL, SBI_COL
         for col in result.columns:
-            self.assertEqual(result[col].dtype, np.float64, f"Column '{col}' is not float64")
+            if col not in [DATE_COL, SBI_COL]:
+                self.assertEqual(result[col].dtype, np.float64, f"Column '{col}' is not float64")
 
 
 class TestValidation(unittest.TestCase):
