@@ -194,6 +194,11 @@ Excluded from Git (.gitignore) to prevent unnecessary data storage in the reposi
    - **Structural Joins**: Identifying keys (like SBI Branches) within feature tables are mathematically preserved as vertical indices alongside Time, guaranteeing flawless index merging against the specific target rows.
    - **Data Quality Gates**: Zero-Null policies are enforced automatically via interpolation routines, ensuring the Data Store evaluates exactly to machine-learning constraints natively prior to execution.
 
+### Imputation Methodology
+We mathematically enforce a strict Zero-Null policy using a Grouped Time-Series Strategy (`src/utils/m_imputation.py`). 
+- **Target Variables**: Sorted chronologically by Branch and Date. Short temporal gaps are bridged via Forward Fill (`ffill`) to preserve sector-specific reality without artificial spikes. Structural gaps fallback to Median Imputation for safe central tendency.
+- **Feature Variables**: Binary One-Hot Encoded flags are filled with `0` (absent). Continuous metrics fallback to column Medians. Missing-indicator flags (`_is_missing`) are automatically generated to allow models to learn from the absence of data itself.
+
 ## Machine Learning Engineering
 This documentation outlines the architectural strategy for our machine learning operations. We leverage **MLFlow** for experiment tracking, metric logging, and managing the model registry to ensure a robust MLOps lifecycle.
 
