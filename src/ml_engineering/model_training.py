@@ -67,7 +67,7 @@ class DatasetLoader:
         n_splits: int = 5
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Dict[str, Any]]:
         df = pd.read_sql_table(self.table_name, self.engine)
-        df = df.dropna(subset=[target_column]).sort_values("period_enddate").reset_index(drop=True)
+        df = df.sort_values("period_enddate").reset_index(drop=True)
         y = df[target_column].astype(float)
         
         if features:

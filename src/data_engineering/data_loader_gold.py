@@ -53,9 +53,7 @@ class DatabaseGold:
             # --- CENTRALISED GOLD QUALITY GATE ---
             # Enforce zero-nulls and float64 type casting universally
             numeric_cols = df_gold.select_dtypes(include=['number']).columns
-            if df_gold[numeric_cols].isnull().any().any():
-                f_log(f"WARNING: Imputing missing values with 0 for {identifier}. Validate optimal imputation logic.", c_type="warning")
-            df_gold[numeric_cols] = df_gold[numeric_cols].fillna(0).astype('float64')
+            df_gold[numeric_cols] = df_gold[numeric_cols].astype('float64')
 
             f_log(f"Gold Quality Gate: Processed {len(df_gold)} rows. 0 NaNs remain.", c_type="success")
             
@@ -138,7 +136,8 @@ class DatabaseGold:
         f_log(f"Completed master dataset join. Shape: {master_df.shape}", c_type="complete")
 
         # 5. Preprocessing Gate: validate → impute → validate → persist
-        from src.ml_engineering.model_preprocess import validate_master_dataset, impute_missing_values
+        from src.ml_engineering.model_preprocess import validate_master_dataset
+        from src.utils.m_imputation import impute_missing_values
 
         validate_master_dataset(master_df, stage="raw")
         preprocessed_df = impute_missing_values(master_df)
@@ -227,6 +226,9 @@ def synthesize_master_features(
         else:
             broadcast_joined.append(table)
 
+    if "silver_id" in master_df.columns:
+        master_df = master_df.drop(columns=["silver_id"])
+
     return master_df, sbi_joined, broadcast_joined
 
 
@@ -265,9 +267,7 @@ def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataF
 
         df['period_enddate'] = df['Perioden'].apply(parse_quarter)
 
-    # 2. Target Column Guard
-    if ml_target_col and ml_target_col in df.columns:
-        df = df.dropna(subset=[ml_target_col])
+
 
     # 3. Column Pruning
     meta_cols = ["silver_id", "bronze_pk", "_source_file", "ID", "Perioden"]
@@ -356,8 +356,20 @@ def transform_target_fact_table(df: pd.DataFrame) -> pd.DataFrame:
         if getattr(df[ML_TARGET_COLUMN], 'dtype', None) == object:
             df[ML_TARGET_COLUMN] = df[ML_TARGET_COLUMN].str.replace(',', '.')
         df[ML_TARGET_COLUMN] = pd.to_numeric(df[ML_TARGET_COLUMN], errors='coerce')
-        # Hard drop rule enforcing valid target constraints
-        df = df.dropna(subset=[ML_TARGET_COLUMN])
+        from src.utils.m_imputation import impute_target_variable
+        df = impute_target_variable(df, ML_TARGET_COLUMN, 'BedrijfstakkenBranchesSBI2008', 'period_enddate')
+
+    # 2. Temporal Feature Engineering
+    if 'period_enddate' in df.columns and pd.api.types.is_datetime64_any_dtype(df['period_enddate']):
+        df['year'] = df['period_enddate'].dt.year.astype(int)
+        df['quarter'] = df['period_enddate'].dt.quarter.astype(int)
+        
+        min_date = df['period_enddate'].min()
+        if pd.notnull(min_date):
+            df['trend_index'] = (
+                (df['period_enddate'].dt.year - min_date.year) * 4 + 
+                (df['period_enddate'].dt.quarter - min_date.quarter) + 1
+            ).astype(int)
 
     import re
     # 2. Dynamic One-Hot Encoding for all dimension bounds remaining
