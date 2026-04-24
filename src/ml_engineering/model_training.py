@@ -30,11 +30,13 @@ except ImportError:
 # --- Logging ---
 from src.utils.m_log import f_log
 
-# Global enforcement of SQLite tracking
-rel_db_eval = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
-db_uri = f"sqlite:///{rel_db_eval}?timeout=30"
-os.environ["MLFLOW_TRACKING_URI"] = db_uri
-mlflow.set_tracking_uri(db_uri)
+def configure_mlflow(db_eval_path: Path, project_root: Path) -> str:
+    """Configures MLflow tracking URI explicitly and returns the URI."""
+    rel_db_eval = db_eval_path.relative_to(project_root).as_posix()
+    db_uri = f"sqlite:///{rel_db_eval}?timeout=30"
+    os.environ["MLFLOW_TRACKING_URI"] = db_uri
+    mlflow.set_tracking_uri(db_uri)
+    return db_uri
 
 
 # --- ORM Model Definitions ---
@@ -56,7 +58,7 @@ class DatasetLoader:
     def __init__(self, db_path: Path, table_name: str):
         self.db_path = db_path
         self.table_name = table_name
-        self.engine = create_engine(f"sqlite:///{self.db_path}")
+        self.engine = create_engine(f"sqlite:///{self.db_path.as_posix()}")
 
     def load_and_split(
         self, 
@@ -90,12 +92,12 @@ class ModelTrainer:
         self.experiment_name = experiment_name
         self.db_eval_path = db_eval_path
         self.engine_eval = engine or create_engine(
-            f"sqlite:///{self.db_eval_path}",
+            f"sqlite:///{self.db_eval_path.as_posix()}",
             connect_args={"timeout": 30}
         )
         
-        rel_path = Path(self.db_eval_path).relative_to(PROJECT_ROOT).as_posix()
-        mlflow.set_tracking_uri(f"sqlite:///{rel_path}")
+        configure_mlflow(self.db_eval_path, PROJECT_ROOT)
+        
         if not mlflow.get_experiment_by_name(self.experiment_name):
             mlflow.create_experiment(self.experiment_name, artifact_location="./mlruns")
         mlflow.set_experiment(self.experiment_name)

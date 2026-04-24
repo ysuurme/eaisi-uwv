@@ -8,7 +8,7 @@ from sklearn.linear_model import LinearRegression
 class TestModelEvaluation(unittest.TestCase):
     @patch("src.ml_engineering.model_evaluation.create_engine")
     def setUp(self, mock_engine):
-        self.evaluator = ModelEvaluator(db_eval_path=Path("fake_eval.db"))
+        self.evaluator = ModelEvaluator(db_eval_path=Path.cwd() / "fake_eval.db")
         self.x_test = pd.DataFrame({"f1": [1, 2]})
         self.y_test = pd.Series([0.5, 0.6])
 

@@ -14,6 +14,54 @@ from src.config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3, CBS_TABLES_T
 from src.utils.m_log import f_log
 
 
+def find_matching_column(table: Table, column_name: str):
+    """Matches dimension names to fact columns, handling spaces."""
+    if column_name in table.c:
+        return table.c[column_name]
+
+def find_foreign_key(table: Table):
+    """Detects the Foreign Key column in a dimension table."""
+    candidates = ["Key", "DimensionKey", "ID", "Code"]
+    return next((table.c[c] for c in candidates if c in table.c), None)
+
+def apply_dim_join(query, fact_table: Table, dim_table: Table, identifier: str):
+    """Helper to find join keys and attach dimension columns to the query."""
+    dim_prefix = f"{identifier}_dim_"
+    dim_suffix = dim_table.name.replace(dim_prefix, "")
+    
+    fk_col_fact = find_matching_column(fact_table, dim_suffix)
+    fk_col_dim = find_foreign_key(dim_table)
+
+    if fk_col_fact is not None and fk_col_dim is not None:
+        query = query.join(dim_table, fk_col_fact == fk_col_dim, isouter=True)
+        for col in dim_table.c:
+            if col.name not in [fk_col_dim.name, "bronze_pk", "_source_file"]:
+                query = query.add_columns(col.label(f"{dim_suffix}_{col.name}"))
+    
+    return query
+
+def validate_silver_data(identifier: str, rows: list):
+    """Scans rows for missing data in critical columns and logs a soft error (warning)."""
+    critical_cols = ['Ziekteverzuimpercentage_1', 'Perioden']
+    missing_stats = {col: 0 for col in critical_cols}
+    
+    for row in rows:
+        row_dict = row._asdict()
+        for col in critical_cols:
+            if col in row_dict and (row_dict[col] is None or row_dict[col] == ''):
+                missing_stats[col] += 1
+
+    for col, count in missing_stats.items():
+        if count > 0:
+            f_log(
+                f"SOFT ERROR/WARNING: Missing data detected in '{identifier}'. "
+                f"Column '{col}' is missing {count} values. "
+                f"Note: Machine Learning algorithms fundamentally cannot train on imputed/synthetic target labels (y) without causing catastrophic model hallucination. "
+                f"The Gold Pipeline seamlessly intercepts and permanently drops these rows from the Fact Table before they reach the ML Orchestrator.",
+                c_type="warning",
+            )
+
+
 class DatabaseSilver:
     """
     Manages the SQLite database in the silver layer.
@@ -26,8 +74,8 @@ class DatabaseSilver:
         if isinstance(self.db_silver_path, Path):
             self.db_silver_path.parent.mkdir(parents=True, exist_ok=True)
         
-        self.engine_bronze = create_engine(f"sqlite:///{self.db_bronze_path}")
-        self.engine_silver = create_engine(f"sqlite:///{self.db_silver_path}")
+        self.engine_bronze = create_engine(f"sqlite:///{self.db_bronze_path.as_posix()}")
+        self.engine_silver = create_engine(f"sqlite:///{self.db_silver_path.as_posix()}")
         self.metadata_bronze = MetaData()
         self.metadata_silver = MetaData()
 
@@ -52,7 +100,7 @@ class DatabaseSilver:
         # 3. Build Query: Start with Fact Table
         query = select(fact_table)
         for dim_table in dim_tables:
-            query = self._apply_dim_join(query, fact_table, dim_table, identifier)
+            query = apply_dim_join(query, fact_table, dim_table, identifier)
             f_log(f"Query after join {str(query)}.", c_type="debug")
         
         # 4. Process and Save
@@ -60,40 +108,13 @@ class DatabaseSilver:
             data = conn.execute(query).fetchall()
             if data:
                 self._save_to_silver(identifier, data)
-            
-
-    def _apply_dim_join(self, query, fact_table, dim_table, identifier):
-            """Helper to find join keys and attach dimension columns to the query."""
-            dim_prefix = f"{identifier}_dim_"
-            dim_suffix = dim_table.name.replace(dim_prefix, "")
-            
-            fk_col_fact = self._find_matching_column(fact_table, dim_suffix)
-            fk_col_dim = self._find_foreign_key(dim_table)
-
-            if fk_col_fact is not None and fk_col_dim is not None:
-                query = query.join(dim_table, fk_col_fact == fk_col_dim, isouter=True)
-                for col in dim_table.c:
-                    if col.name not in [fk_col_dim.name, "bronze_pk", "_source_file"]:
-                        query = query.add_columns(col.label(f"{dim_suffix}_{col.name}"))
-            
-            return query
-
-    def _find_matching_column(self, table, column_name: str):
-        """Matches dimension names to fact columns, handling spaces."""
-        if column_name in table.c:
-            return table.c[column_name]
-
-    def _find_foreign_key(self, table):
-        """Detects the Foreign Key column in a dimension table."""
-        candidates = ["Key", "DimensionKey", "ID", "Code"]
-        return next((table.c[c] for c in candidates if c in table.c), None)
 
     def _save_to_silver(self, identifier, rows):
         """Handles table creation and bulk insertion into Silver layer."""
         silver_table_name = f"{identifier}_silver"
 
         # --- SILVER VALIDATION GATE (Soft Error) ---
-        self._validate_silver_data(identifier, rows)
+        validate_silver_data(identifier, rows)
 
         if silver_table_name in self.metadata_silver.tables:
             self.metadata_silver.remove(self.metadata_silver.tables[silver_table_name])
@@ -110,28 +131,7 @@ class DatabaseSilver:
         with self.engine_silver.begin() as conn:
             conn.execute(insert(silver_table), [row._asdict() for row in rows])
             f_log(f"Loaded {len(rows)} rows into {silver_table_name}", c_type="success")
-
-    def _validate_silver_data(self, identifier: str, rows: list):
-        """Scans rows for missing data in critical columns and logs a soft error (warning)."""
-        critical_cols = ['Ziekteverzuimpercentage_1', 'Perioden']
-        missing_stats = {col: 0 for col in critical_cols}
-        
-        for row in rows:
-            row_dict = row._asdict()
-            for col in critical_cols:
-                if col in row_dict and (row_dict[col] is None or row_dict[col] == ''):
-                    missing_stats[col] += 1
-
-        for col, count in missing_stats.items():
-            if count > 0:
-                f_log(
-                    f"SOFT ERROR/WARNING: Missing data detected in '{identifier}'. "
-                    f"Column '{col}' is missing {count} values. "
-                    f"Note: Machine Learning algorithms fundamentally cannot train on imputed/synthetic target labels (y) without causing catastrophic model hallucination. "
-                    f"The Gold Pipeline seamlessly intercepts and permanently drops these rows from the Fact Table before they reach the ML Orchestrator.",
-                    c_type="warning",
-                )
-
+            
 
 if __name__ == "__main__":
     db = DatabaseSilver(DIR_DB_BRONZE, DIR_DB_SILVER)

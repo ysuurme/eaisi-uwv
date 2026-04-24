@@ -24,7 +24,7 @@ class DatabaseGold:
         self.db_silver_path = Path(db_silver_path)
         self.db_gold_path = Path(db_gold_path)
         self.db_gold_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{self.db_gold_path}")
+        self.engine = create_engine(f"sqlite:///{self.db_gold_path.as_posix()}")
         self.metadata = MetaData()
 
 
@@ -103,101 +103,27 @@ class DatabaseGold:
                 f_log("Master target dataframe is empty. Aborting master integration.", c_type="error")
                 return master_df
 
-            # Ensure consistent nomenclature for the target table
-            master_df = apply_gold_baseline(master_df, ML_TARGET_COLUMN)
-
-            # Reconstruct raw SBI_COL from OHE columns so Tier 1 joins are possible.
-            # OHE in transform_target_fact_table replaces the raw column with binary flags per value.
-            # CBS uses several naming variants for the SBI dimension — try them all.
-            sbi_ohe_prefixes = [
-                f"{SBI_COL}_",
-                "BedrijfstakkenSBI2008_",
-                "Bedrijfstakken_SBI2008_",
-                "SBI2008_",
-            ]
-            ohe_prefix = None
-            ohe_cols = []
-            for candidate_prefix in sbi_ohe_prefixes:
-                ohe_cols = [c for c in master_df.columns if c.startswith(candidate_prefix)]
-                if ohe_cols:
-                    ohe_prefix = candidate_prefix
-                    break
-
-            if ohe_cols and SBI_COL not in master_df.columns:
-                master_df[SBI_COL] = master_df[ohe_cols].idxmax(axis=1).str.replace(ohe_prefix, "", regex=False)
-                f_log(f"Reconstructed '{SBI_COL}' from {len(ohe_cols)} OHE columns (prefix: '{ohe_prefix}').", c_type="process")
-            elif SBI_COL not in master_df.columns:
-                f_log(f"WARNING: '{SBI_COL}' not found in target and no OHE columns detected. "
-                      "All feature joins will fall back to Tier 2 (Broadcast).", c_type="warning")
-
-            sbi_count = master_df[SBI_COL].nunique() if SBI_COL in master_df.columns else 0
-            f_log(f"Master target loaded: {len(master_df)} rows across {sbi_count} unique SBI branches.", c_type="process")
-
-
-            # 2. Identify all Feature Tables (exclude output table to prevent self-join)
+            # 2. Identify and Load all Feature Tables
             try:
                 tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
             except Exception as e:
                 f_log(f"Failed reading sqlite_master: {e}", c_type="error")
                 return master_df
 
-            # Only tables with _gold suffix are joined; master_data_ml has no _gold suffix so is naturally excluded.
             excluded = {target_table_name}
-            feature_tables = [t for t in tables['name'].tolist() if t.endswith("_gold") and t not in excluded]
+            feature_table_names = [t for t in tables['name'].tolist() if t.endswith("_gold") and t not in excluded]
 
-            # 3. Tiered Feature Merge (Broadcast Dimension Pattern)
-            # Track join tiers for the end-of-run summary report
-            sbi_joined: list[str] = []
-            broadcast_joined: list[str] = []
-
-            for table in feature_tables:
-                f_log(f"Evaluating feature table for join: {table}", c_type="process")
+            feature_dfs = {}
+            for table in feature_table_names:
                 try:
-                    feature_df = pd.read_sql_query(f"SELECT * FROM \"{table}\"", conn)
-
-                    if DATE_COL not in feature_df.columns:
-                        f_log(f"Skipping {table}: missing '{DATE_COL}', cannot align temporally.", c_type="warning")
-                        continue
-
-                    # Tier 1 requires SBI on BOTH the feature table AND the master table
-                    has_sbi = SBI_COL in feature_df.columns and SBI_COL in master_df.columns
-                    active_keys = [DATE_COL, SBI_COL] if has_sbi else [DATE_COL]
-                    tier_label = "Tier 1 (SBI-specific)" if has_sbi else "Tier 2 (Broadcast)"
-                    f_log(f"{tier_label} join selected for: {table}", c_type="info")
-
-                    # Guard: Tier 2 tables with multiple rows per date must be aggregated
-                    # to prevent Cartesian explosions (N_master × N_feature per quarter).
-                    if not has_sbi and feature_df.duplicated(subset=[DATE_COL]).any():
-                        numeric_feature_cols = feature_df.select_dtypes(include="number").columns.tolist()
-                        pre_agg_rows = len(feature_df)
-                        feature_df = feature_df.groupby(DATE_COL, as_index=False)[numeric_feature_cols].mean()
-                        f_log(f"Aggregated {table} from {pre_agg_rows} -> {len(feature_df)} rows "
-                              f"(mean across sectors) to prevent Cartesian explosion.", c_type="warning")
-
-                    # Preemptive overlap dropping to prevent _x/_y suffixes
-                    overlap = set(feature_df.columns).intersection(set(master_df.columns)) - set(active_keys)
-                    if overlap:
-                        overlap_list = sorted(list(overlap))
-                        f_log(f"Soft Log: Dropping overlap {overlap_list} from incoming table: {table}", c_type="info")
-                        feature_df = feature_df.drop(columns=overlap_list)
-
-                    initial_rows = len(master_df)
-                    master_df = pd.merge(master_df, feature_df, on=active_keys, how="left")
-
-                    f_log(f"Joined {table}: +{len(feature_df.columns) - len(active_keys)} features.", c_type="success")
-                    if len(master_df) != initial_rows:
-                        f_log(f"WARNING: Cartesian explosion detected! Rows shifted {initial_rows} -> {len(master_df)}.", c_type="warning")
-
-                    if has_sbi:
-                        sbi_joined.append(table)
-                    else:
-                        broadcast_joined.append(table)
-
+                    feature_dfs[table] = pd.read_sql_query(f"SELECT * FROM \"{table}\"", conn)
                 except Exception as e:
-                    f_log(f"Error processing feature table {table}: {e}", c_type="error")
+                    f_log(f"Error loading feature table {table}: {e}", c_type="error")
 
-        # Join Summary Report — gives engineers immediate visibility into which
-        # CBS tables still need a SBI_COL dimension added for sub-sector precision.
+        # 3. Tiered Feature Merge using Pure Function
+        master_df, sbi_joined, broadcast_joined = synthesize_master_features(master_df, feature_dfs, ML_TARGET_COLUMN)
+
+        # Join Summary Report
         f_log("--- Master Join Summary ---", c_type="info")
         f_log(f"Tier 1 (SBI-specific, {len(sbi_joined)} tables): {sbi_joined or 'None'}", c_type="info")
         f_log(f"Tier 2 (Broadcast/no SBI, {len(broadcast_joined)} tables — ADD SBI DIMENSION): {broadcast_joined or 'None'}", c_type="warning")
@@ -226,6 +152,82 @@ class DatabaseGold:
 
         f_log(f"Completed full preprocessing pipeline. Final shape: {preprocessed_df.shape}", c_type="complete")
         return master_df
+
+
+def synthesize_master_features(
+    master_df: pd.DataFrame,
+    feature_dfs: dict[str, pd.DataFrame],
+    target_col: str
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """
+    Synthesizes the Gold Layer into a unified SBI-granular Master Training Matrix.
+    Pure function avoiding side-effects.
+    
+    Args:
+        master_df: The foundational target DataFrame.
+        feature_dfs: Dictionary of feature DataFrames keyed by table name.
+        target_col: The target column name for baseline application.
+
+    Returns:
+        Tuple of (master_df, sbi_joined_list, broadcast_joined_list)
+    """
+    master_df = master_df.copy()
+    SBI_COL = "BedrijfstakkenBranchesSBI2008"
+    DATE_COL = "period_enddate"
+
+    if master_df.empty:
+        return master_df, [], []
+
+    # Ensure consistent nomenclature for the target table
+    master_df = apply_gold_baseline(master_df, target_col)
+
+    # Reconstruct raw SBI_COL from OHE columns so Tier 1 joins are possible.
+    sbi_ohe_prefixes = [
+        f"{SBI_COL}_",
+        "BedrijfstakkenSBI2008_",
+        "Bedrijfstakken_SBI2008_",
+        "SBI2008_",
+    ]
+    ohe_prefix = None
+    ohe_cols = []
+    for candidate_prefix in sbi_ohe_prefixes:
+        ohe_cols = [c for c in master_df.columns if c.startswith(candidate_prefix)]
+        if ohe_cols:
+            ohe_prefix = candidate_prefix
+            break
+
+    if ohe_cols and SBI_COL not in master_df.columns:
+        master_df[SBI_COL] = master_df[ohe_cols].idxmax(axis=1).str.replace(ohe_prefix, "", regex=False)
+
+    sbi_joined: list[str] = []
+    broadcast_joined: list[str] = []
+
+    for table, feature_df in feature_dfs.items():
+        feature_df = feature_df.copy()
+
+        if DATE_COL not in feature_df.columns:
+            continue
+
+        has_sbi = SBI_COL in feature_df.columns and SBI_COL in master_df.columns
+        active_keys = [DATE_COL, SBI_COL] if has_sbi else [DATE_COL]
+
+        if not has_sbi and feature_df.duplicated(subset=[DATE_COL]).any():
+            numeric_feature_cols = feature_df.select_dtypes(include="number").columns.tolist()
+            feature_df = feature_df.groupby(DATE_COL, as_index=False)[numeric_feature_cols].mean()
+
+        overlap = set(feature_df.columns).intersection(set(master_df.columns)) - set(active_keys)
+        if overlap:
+            overlap_list = sorted(list(overlap))
+            feature_df = feature_df.drop(columns=overlap_list)
+
+        master_df = pd.merge(master_df, feature_df, on=active_keys, how="left")
+
+        if has_sbi:
+            sbi_joined.append(table)
+        else:
+            broadcast_joined.append(table)
+
+    return master_df, sbi_joined, broadcast_joined
 
 
 def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataFrame:

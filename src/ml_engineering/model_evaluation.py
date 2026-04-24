@@ -22,9 +22,7 @@ except ImportError:
 # --- Logging ---
 from src.utils.m_log import f_log
 
-# Centralised MLflow tracking
-rel_db_eval = Path(DIR_DB_EVAL).relative_to(PROJECT_ROOT).as_posix()
-mlflow.set_tracking_uri(f"sqlite:///{rel_db_eval}")
+# MLflow tracking configuration is injected dynamically to avoid side effects.
 
 
 # --- ORM Model Definitions ---
@@ -56,9 +54,14 @@ class ModelEvaluator:
             self.db_eval_path.parent.mkdir(parents=True, exist_ok=True)
             
         self.engine = create_engine(
-            f"sqlite:///{self.db_eval_path}",
+            f"sqlite:///{self.db_eval_path.as_posix()}",
             connect_args={"timeout": 30} 
         )
+        
+        # Configure MLflow tracking for evaluation
+        rel_db_eval = self.db_eval_path.relative_to(PROJECT_ROOT).as_posix()
+        mlflow.set_tracking_uri(f"sqlite:///{rel_db_eval}?timeout=30")
+        
         self._init_db()
 
     def _init_db(self):
