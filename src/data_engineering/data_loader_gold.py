@@ -226,6 +226,9 @@ def synthesize_master_features(
         else:
             broadcast_joined.append(table)
 
+    if "silver_id" in master_df.columns:
+        master_df = master_df.drop(columns=["silver_id"])
+
     return master_df, sbi_joined, broadcast_joined
 
 
