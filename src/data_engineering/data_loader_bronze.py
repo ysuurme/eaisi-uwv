@@ -11,6 +11,35 @@ from src.config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T65
 from src.utils.m_log import f_log
 
 
+def infer_primary_key(file_name: str, data_sample: dict) -> str:
+    """Determines the Primary Key Name from the data sample."""
+    potential_keys = ["ID", "Key", "DimensionKey"]
+    primary_key = next((k for k in potential_keys if k in data_sample), None)
+    if not primary_key:
+        f_log(f"No ID found in {file_name}, skipping table insertion.", c_type="error")
+        return None
+    return primary_key
+
+def clean_bronze_data(file_name: str, data: list, primary_key: str) -> list:
+    """Cleans string fields by stripping whitespace and add key columns."""
+    cleaned_data = []
+    for record in data:
+        clean_record = {k: (v.strip() if isinstance(v, str) else v) for k, v in record.items()}
+        pk = clean_record.get(primary_key)
+        clean_record["bronze_pk"] = f"{file_name}_{pk}"
+        clean_record["_source_file"] = file_name
+        cleaned_data.append(clean_record)
+    return cleaned_data
+
+def infer_column_type(value):
+    """Simple type inference for 'Raw' data integrity."""
+    if isinstance(value, int):
+        return Integer
+    if isinstance(value, float):
+        return Float
+    return String
+
+
 class DatabaseBronze:
     """
     Manages the SQLite database in the bronze layer using SQLAlchemy Core.
@@ -22,37 +51,6 @@ class DatabaseBronze:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{self.db_path}")
         self.metadata = MetaData()
-
-
-    def _infer_primary_key(self, file_name, data_sample: dict) -> str:
-        """Determines the Primary Key Name from the data sample."""
-        potential_keys = ["ID", "Key", "DimensionKey"]
-        primary_key = next((k for k in potential_keys if k in data_sample), None)
-        if not primary_key:
-            f_log(f"No ID found in {file_name}, skipping table insertion.", c_type="error")
-            return
-        return primary_key
-    
-
-    def _clean_data(self, file_name, data, primary_key) -> list:
-        """Cleans string fields by stripping whitespace and add key columns."""
-        cleaned_data = []
-        for record in data:
-            clean_record = {k: (v.strip() if isinstance(v, str) else v) for k, v in record.items()}
-            pk = clean_record.get(primary_key)
-            clean_record["bronze_pk"] = f"{file_name}_{pk}"
-            clean_record["_source_file"] = file_name
-            cleaned_data.append(clean_record)
-        return cleaned_data
-
-
-    def _infer_column_type(self, value):
-            """Simple type inference for 'Raw' data integrity."""
-            if isinstance(value, int):
-                return Integer
-            if isinstance(value, float):
-                return Float
-            return String
 
 
     def ingest_0_raw_folder(self, identifier: str):
@@ -86,15 +84,17 @@ class DatabaseBronze:
         data_sample = data[0]
         columns = []
 
-        primary_key = self._infer_primary_key(file_name, data_sample)
+        primary_key = infer_primary_key(file_name, data_sample)
+        if not primary_key:
+            return
 
-        cleaned_data = self._clean_data(file_name, data, primary_key)   
+        cleaned_data = clean_bronze_data(file_name, data, primary_key)   
       
         columns.append(Column("bronze_pk", String, primary_key=True))
         for key, value in cleaned_data[0].items():
             if key == "bronze_pk":
                 continue
-            col_type = self._infer_column_type(value)
+            col_type = infer_column_type(value)
             columns.append(Column(key, col_type, primary_key=False))
 
         table = Table(table_name, self.metadata, *columns, extend_existing=True)
