@@ -359,6 +359,18 @@ def transform_target_fact_table(df: pd.DataFrame) -> pd.DataFrame:
         from src.utils.m_imputation import impute_target_variable
         df = impute_target_variable(df, ML_TARGET_COLUMN, 'BedrijfstakkenBranchesSBI2008', 'period_enddate')
 
+    # 2. Temporal Feature Engineering
+    if 'period_enddate' in df.columns and pd.api.types.is_datetime64_any_dtype(df['period_enddate']):
+        df['year'] = df['period_enddate'].dt.year.astype(int)
+        df['quarter'] = df['period_enddate'].dt.quarter.astype(int)
+        
+        min_date = df['period_enddate'].min()
+        if pd.notnull(min_date):
+            df['trend_index'] = (
+                (df['period_enddate'].dt.year - min_date.year) * 4 + 
+                (df['period_enddate'].dt.quarter - min_date.quarter) + 1
+            ).astype(int)
+
     import re
     # 2. Dynamic One-Hot Encoding for all dimension bounds remaining
     # Omit unparsed metrics safely utilizing the CBS metric suffix identifier
