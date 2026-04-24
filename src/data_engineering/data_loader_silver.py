@@ -74,8 +74,8 @@ class DatabaseSilver:
         if isinstance(self.db_silver_path, Path):
             self.db_silver_path.parent.mkdir(parents=True, exist_ok=True)
         
-        self.engine_bronze = create_engine(f"sqlite:///{self.db_bronze_path}")
-        self.engine_silver = create_engine(f"sqlite:///{self.db_silver_path}")
+        self.engine_bronze = create_engine(f"sqlite:///{self.db_bronze_path.as_posix()}")
+        self.engine_silver = create_engine(f"sqlite:///{self.db_silver_path.as_posix()}")
         self.metadata_bronze = MetaData()
         self.metadata_silver = MetaData()
 

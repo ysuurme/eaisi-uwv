@@ -24,7 +24,7 @@ class DatabaseGold:
         self.db_silver_path = Path(db_silver_path)
         self.db_gold_path = Path(db_gold_path)
         self.db_gold_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{self.db_gold_path}")
+        self.engine = create_engine(f"sqlite:///{self.db_gold_path.as_posix()}")
         self.metadata = MetaData()
 
 

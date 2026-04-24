@@ -58,7 +58,7 @@ class DatasetLoader:
     def __init__(self, db_path: Path, table_name: str):
         self.db_path = db_path
         self.table_name = table_name
-        self.engine = create_engine(f"sqlite:///{self.db_path}")
+        self.engine = create_engine(f"sqlite:///{self.db_path.as_posix()}")
 
     def load_and_split(
         self, 
@@ -92,7 +92,7 @@ class ModelTrainer:
         self.experiment_name = experiment_name
         self.db_eval_path = db_eval_path
         self.engine_eval = engine or create_engine(
-            f"sqlite:///{self.db_eval_path}",
+            f"sqlite:///{self.db_eval_path.as_posix()}",
             connect_args={"timeout": 30}
         )
         

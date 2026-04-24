@@ -49,7 +49,7 @@ class DatabaseBronze:
         self.data_raw_path = data_raw_path
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{self.db_path}")
+        self.engine = create_engine(f"sqlite:///{self.db_path.as_posix()}")
         self.metadata = MetaData()
 
 

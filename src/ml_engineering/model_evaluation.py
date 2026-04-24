@@ -54,7 +54,7 @@ class ModelEvaluator:
             self.db_eval_path.parent.mkdir(parents=True, exist_ok=True)
             
         self.engine = create_engine(
-            f"sqlite:///{self.db_eval_path}",
+            f"sqlite:///{self.db_eval_path.as_posix()}",
             connect_args={"timeout": 30} 
         )
         
