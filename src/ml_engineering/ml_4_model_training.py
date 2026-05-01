@@ -17,16 +17,6 @@ from sqlalchemy.orm import Session
 from src.ml_engineering.model_configs import ModelExperiment, ModelTuningRecord
 from src.utils.m_log import f_log
 
-CONDA_ENV = {
-    "name": "eaisi-uwv-env",
-    "channels": ["conda-forge"],
-    "dependencies": [
-        "python=3.10.11",
-        {"pip": ["mlflow>=3.10.1", "scikit-learn>=1.6.0", "pandas>=2.3.3",
-                 "sqlalchemy>=2.0.45", "skops>=0.13.0"]},
-    ],
-}
-
 
 class ModelTrainer:
     """Trains a single estimator and logs results to MLflow."""
