@@ -20,6 +20,8 @@ dependencies = [
     "statsforecast>=2.0.2",
     "jupytext>=1.19.1",
     "ruptures>=1.1.10",
+    "chronos-forecasting>=2.2.2",
+    "ipywidgets>=8.1.8",
 ]
 
 [project.scripts]
