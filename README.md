@@ -55,7 +55,7 @@ uv run main.py master_data_ml_preprocessed linear - compensation,working_conditi
 uv run main.py --refresh-data
 ```
 
-**Available model keys:** `baseline`, `linear`, `random_forest`, `gradient_boosting`, `hist_gradient_boosting`, `prophet`
+**Available model keys:** `baseline`, `linear`, `random_forest`, `gradient_boosting`, `hist_gradient_boosting`
 
 ### 3. Track Results (MLflow)
 The pipeline is "Zero-Artifact"; all results are stored in `data/4_eval/eval_data.db`. Launch the UI to view metrics, tuning grids, and model signatures.
@@ -261,7 +261,6 @@ Every pipeline run operates on exactly one quarterly time series (1 row per quar
 | `random_forest` | `make_reduction(RandomForestRegressor, window_length=12)` | `window_length`, `n_estimators`, `max_depth` |
 | `gradient_boosting` | `make_reduction(GradientBoostingRegressor, window_length=12)` | `window_length`, `n_estimators`, `learning_rate` |
 | `hist_gradient_boosting` | `make_reduction(HistGradientBoostingRegressor, window_length=12)` | `window_length`, `learning_rate`, `max_iter` |
-| `prophet` | `Prophet()` | No |
 
 **`SectorQuarterRollingMean`**: Domain-specific baseline. For each quarter Q, predicts the mean of Q from the previous 3 years using `shift(1).rolling_mean(window_size=3, min_samples=3).over([quarter])`. Requires 3 full prior-year observations before producing a prediction (matching the CBS notebook approach). Because `shift(1)` within the same-quarter group equals a 1-year shift, this is inherently a 4-quarter-ahead forecast.
 

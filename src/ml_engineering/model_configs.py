@@ -22,7 +22,6 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import LinearRegression
 from sktime.forecasting.compose import make_reduction
-from sktime.forecasting.fbprophet import Prophet
 from sqlalchemy import String, Float, LargeBinary, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -316,13 +315,12 @@ class ModelConfiguration:
             feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
             description="HistGradientBoosting via make_reduction (recursive).",
         ),
-        "prophet": ModelExperiment(
-            name="Prophet",
-            estimator=Prophet(),
-            param_grid={},
-            feature_groups=["compensation", "labor_volume"],
-            description="Meta Prophet: additive trend + quarterly seasonality. Exogenous features supported.",
-        ),
+        # Prophet removed: unsuitable for quarterly 4Q-ahead forecasting.
+        # Reasons: (1) designed for high-frequency data (daily/weekly), not 4 obs/year;
+        # (2) 400 regressors on ~100 training rows causes extreme overfitting (R² ≈ -2300);
+        # (3) PerformanceWarning from fragmented DataFrame at 400 columns;
+        # (4) sktime Prophet adapter requires exact date-index alignment for future X
+        #     which conflicts with freq=None DatetimeIndex used throughout the pipeline.
     }
 
     @classmethod

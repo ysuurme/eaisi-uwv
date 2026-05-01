@@ -6,19 +6,24 @@ Given an estimator configuration and training data, fits the model
 
 Two execution paths based on estimator type:
     SectorQuarterRollingMean  — sklearn-compatible baseline; standard .fit(X, y)
+                                logged via mlflow.sklearn.log_model so that
+                                mlflow.models.evaluate works natively in Step 5.
     sktime forecasters        — make_reduction / Prophet; sktime .fit(y, X) API
                                 tuned via ForecastingGridSearchCV + ExpandingWindowSplitter
+                                logged via mlflow.pyfunc so the MLflow registry can
+                                resolve runs:/{run_id}/model in Step 6.
 """
 import json
 import os
 import pickle
 import tempfile
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-import pandas as pd
 import mlflow
+import mlflow.pyfunc
 import mlflow.sklearn
-import skops.io as sio
+import pandas as pd
+from sktime.forecasting.base import ForecastingHorizon
 from sktime.forecasting.model_selection import ExpandingWindowSplitter, ForecastingGridSearchCV
 from sqlalchemy.orm import Session
 
@@ -29,6 +34,40 @@ from src.ml_engineering.model_configs import (
 )
 from src.utils.m_log import f_log
 
+
+# ---------------------------------------------------------------------------
+# pyfunc wrapper — bridges MLflow's predict(model_input) with sktime's
+# predict(fh, X) API, enabling sktime models to be registered in the registry.
+# Defined at module level so mlflow.pyfunc can serialize it correctly.
+# ---------------------------------------------------------------------------
+
+class _SktimePyfuncWrapper(mlflow.pyfunc.PythonModel):
+    """Minimal pyfunc wrapper for sktime forecasters.
+
+    Enables MLflow model registration (mlflow.register_model) for sktime
+    models whose predict signature — predict(fh, X) — differs from sklearn's
+    predict(X).  Hardcodes a 4-quarter relative horizon matching the project's
+    forecast objective.
+    """
+
+    def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
+        with open(context.artifacts["model_pkl"], "rb") as f:
+            self._forecaster = pickle.load(f)
+
+    def predict(
+        self,
+        context: mlflow.pyfunc.PythonModelContext,
+        model_input: pd.DataFrame,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> pd.Series:
+        fh = ForecastingHorizon([1, 2, 3, 4], is_relative=True)
+        X = model_input.select_dtypes(include="number")
+        return self._forecaster.predict(fh=fh, X=X if not X.empty else None)
+
+
+# ---------------------------------------------------------------------------
+# Trainer
+# ---------------------------------------------------------------------------
 
 class ModelTrainer:
     """Trains a single estimator and logs results to MLflow."""
@@ -68,12 +107,12 @@ class ModelTrainer:
         """Dispatches to sklearn or sktime fit path based on estimator type."""
         estimator = experiment.estimator
 
-        # ── Baseline: sklearn-compatible, receives full X (incl. SBI text col) ──
+        # ── Baseline: sklearn-compatible ──────────────────────────────────────
         if isinstance(estimator, SectorQuarterRollingMean):
             estimator.fit(x_train, y_train)
             return estimator
 
-        # ── sktime forecasters: drop the non-numeric SBI text column ──
+        # ── sktime forecasters ────────────────────────────────────────────────
         X_numeric = x_train.select_dtypes(include="number")
         X = X_numeric if (experiment.feature_groups is not None and not X_numeric.empty) else None
 
@@ -113,12 +152,16 @@ class ModelTrainer:
         x_train: pd.DataFrame,
         y_train: pd.Series,
     ) -> None:
-        """Logs model params and serialized artifact to MLflow.
+        """Logs model params and a registered MLflow model artifact.
 
-        - SectorQuarterRollingMean (sklearn): logged via mlflow.sklearn.log_model
-          so that mlflow.models.evaluate can load and score it natively.
-        - sktime forecasters: serialized via pickle (skops does not support sktime
-          internals) and logged as a raw artifact.
+        SectorQuarterRollingMean (sklearn-compatible)
+            Logged via mlflow.sklearn.log_model — enables mlflow.models.evaluate
+            in Step 5 and creates a LoggedModel entry for the registry.
+
+        sktime forecasters
+            Pickled then wrapped in _SktimePyfuncWrapper and logged via
+            mlflow.pyfunc.log_model — creates a LoggedModel entry so that
+            mlflow.register_model(runs:/{run_id}/model) resolves in Step 6.
         """
         mlflow.log_param("model_class", type(fitted_model).__name__)
         mlflow.log_param("train_rows", len(y_train))
@@ -126,7 +169,6 @@ class ModelTrainer:
                          x_train.select_dtypes(include="number").shape[1])
 
         if isinstance(fitted_model, SectorQuarterRollingMean):
-            # sklearn-compatible → mlflow.sklearn so mlflow.models.evaluate works
             signature = mlflow.models.infer_signature(
                 x_train, fitted_model.predict(x_train)
             )
@@ -136,11 +178,22 @@ class ModelTrainer:
                 signature=signature,
                 input_example=x_train.head(1),
             )
-        else:
-            # sktime forecaster → pickle artifact
-            model_bytes = pickle.dumps(fitted_model)
-            with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
-                f.write(model_bytes)
-                tmp_path = f.name
-            mlflow.log_artifact(tmp_path, artifact_path="model")
+            return
+
+        # sktime: pickle the forecaster, wrap in pyfunc for registry compatibility
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            pickle.dump(fitted_model, f)
+            tmp_path = f.name
+
+        try:
+            mlflow.pyfunc.log_model(
+                name="model",
+                python_model=_SktimePyfuncWrapper(),
+                artifacts={"model_pkl": tmp_path},
+                # input_example intentionally omitted: MLflow's validation call passes
+                # training rows as future X to the sktime adapter, which then tries to
+                # .loc[] them by absolute forecast dates — those dates don't exist in
+                # the training index, causing a spurious KeyError during validation.
+            )
+        finally:
             os.unlink(tmp_path)

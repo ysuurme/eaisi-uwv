@@ -29,7 +29,7 @@ class DataPreparator:
     def prepare(
         df: pd.DataFrame,
         target_column: str,
-        n_test: int = 4,
+        n_test: int = 20,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Dict[str, Any]]:
         """Performs a time-aware split and sets a DatetimeIndex.
 
@@ -38,8 +38,9 @@ class DataPreparator:
                 Must contain exactly one row per unique quarter date
                 (guaranteed by Step 1's aggregation).
             target_column: Name of the ML target column.
-            n_test: Number of unique quarter dates to hold out as the test
-                    window.  Default 4 = 1 year = the 4-quarter forecast horizon.
+            n_test: Number of unique quarter dates to hold out as the
+                    evaluation window.  Must be divisible by 4 (forecast horizon).
+                    Default 20 = 5 rolling origins × 4Q each.
 
         Returns:
             (X_train, X_test, y_train, y_test, lineage_metadata)

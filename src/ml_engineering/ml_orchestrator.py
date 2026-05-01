@@ -65,6 +65,7 @@ def run_pipeline(
     gold_table: str = "master_data_ml_preprocessed",
     feature_groups: Optional[List[str]] = None,
     sbi_filter_col: Optional[str] = None,
+    n_test_points: int = 20,
     threshold_r2: float = 0.2,
 ) -> None:
     """MLOps Level 0: Manual ML Pipeline.
@@ -76,6 +77,8 @@ def run_pipeline(
         sbi_filter_col: OHE column for sector-specific mode, e.g.
             ``'BedrijfskenmerkenSBI2008_301000'``.  None = all-industry mode
             (aggregate across all sectors to one quarterly series).
+        n_test_points: Number of quarterly evaluation points for walk-forward
+            assessment.  Must be divisible by 4.  Default 20 = 5 origins × 4Q.
         threshold_r2: Minimum R² score to pass the quality gate.
     """
     # --- Select Estimator ---
@@ -127,7 +130,7 @@ def run_pipeline(
     # --- Step 3: Data Preparation ---
     f_log("Step 3 | Preparing train/test split...", c_type="process")
     x_train, x_test, y_train, y_test, lineage = DataPreparator.prepare(
-        raw_df, target_column=ML_TARGET_COLUMN,
+        raw_df, target_column=ML_TARGET_COLUMN, n_test=n_test_points,
     )
     lineage["dataset"] = gold_table
 
@@ -149,8 +152,14 @@ def run_pipeline(
             f_log("Step 5 | Evaluating on test set...", c_type="process")
             evaluator = ModelEvaluator(session=session)
             metrics = evaluator.evaluate(
-                run_id=run_id, fitted_model=fitted_model,
-                x_test=x_test, y_test=y_test, model_name=model_name,
+                run_id=run_id,
+                fitted_model=fitted_model,
+                x_train=x_train,
+                y_train=y_train,
+                x_test=x_test,
+                y_test=y_test,
+                model_name=model_name,
+                n_test_points=n_test_points,
             )
 
             # --- Commit training + evaluation records atomically ---
@@ -182,6 +191,7 @@ def run_sector_sweep(
     experiment_key: str,
     gold_table: str = "master_data_ml_preprocessed",
     feature_groups: Optional[List[str]] = None,
+    n_test_points: int = 20,
     threshold_r2: float = 0.2,
 ) -> None:
     """Runs the pipeline for every OHE SBI sector column found in the gold table.
@@ -221,6 +231,7 @@ def run_sector_sweep(
                 gold_table=gold_table,
                 sbi_filter_col=sbi_col,
                 feature_groups=feature_groups,
+                n_test_points=n_test_points,
                 threshold_r2=threshold_r2,
             )
         except Exception as exc:
