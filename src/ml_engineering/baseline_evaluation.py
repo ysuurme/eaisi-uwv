@@ -15,7 +15,7 @@ import mlflow
 import polars as pl
 
 try:
-    from config import DIR_DB_GOLD
+    from src.config import DIR_DB_GOLD
 except ImportError:
     raise ImportError("Configuration file 'config.py' not found.")
 
@@ -34,7 +34,8 @@ _BASELINE_TABLES = {
 def _load_baseline(table_name: str) -> pl.DataFrame:
     """Reads a baseline table from the Gold DB."""
     query = f'SELECT * FROM "{table_name}"'
-    return f_query_database(DIR_DB_GOLD, query, "polars")
+    import typing
+    return typing.cast(pl.DataFrame, f_query_database(DIR_DB_GOLD, query, "polars"))
 
 
 def _compute_metrics(df: pl.DataFrame) -> dict:

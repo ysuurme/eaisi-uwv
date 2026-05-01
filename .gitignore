@@ -23,6 +23,8 @@ wheels/
 # Workspace
 .env
 .github
+.claude
+.vscode
 eaisi-uwv.code-workspace
 GEMINI.md
 TODO.md
