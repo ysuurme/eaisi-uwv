@@ -34,7 +34,10 @@ where = ["."]
 include = ["src*"]
 
 [tool.pyright]
-executionEnvironments = [
-  { root = "." }
-]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "."
 extraPaths = ["."]
