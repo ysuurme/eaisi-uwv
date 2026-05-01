@@ -1,9 +1,11 @@
-import unittest
-from unittest.mock import patch, MagicMock
-import pandas as pd
-import sqlite3
 import os
+import sqlite3
+import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+
 from main import run_ml_pipeline
 
 class TestMainE2E(unittest.TestCase):
@@ -39,7 +41,8 @@ class TestMainE2E(unittest.TestCase):
     @patch("src.ml_engineering.model_evaluation.DIR_DB_EVAL")
     @patch("src.ml_engineering.model_orchestrator.DIR_DB_GOLD")
     @patch("main.ModelOrchestrator")
-    def test_run_ml_pipeline_e2e(self, mock_orch, mock_gold_orch, mock_eval_eval, mock_eval_train, mock_gold_train):
+    @patch("main.ensure_mlflow_ui")
+    def test_run_ml_pipeline_e2e(self, mock_ui, mock_orch, mock_gold_orch, mock_eval_eval, mock_eval_train, mock_gold_train):
         """
         Verify that main.py can trigger the orchestrator correctly.
         (Note: We mock the orchestrator itself here to avoid complex MLflow/SQLite locking 

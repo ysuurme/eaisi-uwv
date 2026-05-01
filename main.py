@@ -2,37 +2,62 @@
 Main Entry Point for EAISI UWV ML Pipeline.
 Usage: python main.py <gold_table> <model_key>
 """
-import logging
 import sys
 from config import START_MLFLOW_UI
 from src.ml_engineering.model_configs import ModelRegistry
 from src.ml_engineering.model_orchestrator import ModelOrchestrator
 from src.utils.m_mlflow_ui import ensure_mlflow_ui
 from src.ml_engineering.baseline_evaluation import log_baseline_to_mlflow
+import subprocess
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+# --- Local Application Imports ---
+try:
+    from src.config import START_MLFLOW_UI
+    from src.ml_engineering.model_configs import ModelRegistry
+    from src.ml_engineering.model_orchestrator import ModelOrchestrator
+    from src.utils.m_mlflow_ui import ensure_mlflow_ui
+    from src.utils.m_log import setup_logging, f_log
+except ImportError as e:
+    print(f"Error importing local modules: {e}")
+    print("Ensure you are running from the project root and have run 'uv pip install -e .'")
+    sys.exit(1)
+
+setup_logging()
+
+
+def run_data_pipeline():
+    """Sequentially triggers the full architectural Data Pipeline (Raw -> Bronze -> Silver -> Gold)."""
+    f_log("Initiating Full Data Engineering Pipeline...", c_type="start")
+    scripts = [
+        "src/data_engineering/data_loader_raw.py",
+        "src/data_engineering/data_loader_bronze.py",
+        "src/data_engineering/data_loader_silver.py",
+        "src/data_engineering/data_loader_gold.py"
+    ]
+    for script in scripts:
+        f_log(f"Executing DataLoader: {script}", c_type="process")
+        try:
+            subprocess.run([sys.executable, script], check=True)
+        except subprocess.CalledProcessError as e:
+            f_log(f"Data Pipeline execution crashed violently at: {script}. Aborting process.", c_type="error")
+            sys.exit(1)
+    f_log("Data Pipeline successfully refreshed! All Gold Tables are natively synchronized.", c_type="success")
+
 
 def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
-    """
-    Triggers the full ML lifecycle for a specific Gold table and estimator.
-    """
+    """Triggers the full ML lifecycle for a specific Gold table and estimator."""
     if START_MLFLOW_UI:
         ensure_mlflow_ui()
-        
+
     try:
-        # Derive identifiers (e.g. "80072ned_gold" -> "80072ned")
         dataset_id = gold_table.replace("_gold", "")
-        
-        # Fetch configuration and initialise orchestrator
         config = ModelRegistry.get(model_key)
-        
+
         orchestrator = ModelOrchestrator(
             experiment_name=f"{dataset_id}_SickLeave",
             model_name=f"{config.name}_{dataset_id}"
         )
-        
-        # Execute pipeline
+
         orchestrator.run_experiment(
             gold_table=gold_table,
             experiment_config=config,
@@ -40,17 +65,22 @@ def run_ml_pipeline(gold_table: str, model_key: str, features: list = None):
             features=features
         )
     except Exception as e:
-        logger.error(f"❌ Pipeline failed for table '{gold_table}' with model '{model_key}': {e}")
+        f_log(f"Pipeline failed for table '{gold_table}' with model '{model_key}': {e}", c_type="error")
         raise e
 
+
 def main():
-    # CLI Handling: python main.py <gold_table> <model_key> <features_csv>
-    gold_table = sys.argv[1] if len(sys.argv) > 1 else "80072ned_gold"
+    # Intercept data-pipeline trigger
+    if "--refresh-data" in sys.argv:
+        sys.argv.remove("--refresh-data")
+        run_data_pipeline()
+
+    gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
     model_key = sys.argv[2] if len(sys.argv) > 2 else "random_forest"
     features = sys.argv[3].split(",") if len(sys.argv) > 3 else None
-    
-    logger.info(f"🎯 Starting Pipeline | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}")
-    
+
+    f_log(f"Starting ML Lifecycle | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}", c_type="start")
+
     try:
         log_baseline_to_mlflow(experiment_name=f"{gold_table.replace('_gold', '')}_SickLeave")
         run_ml_pipeline(gold_table, model_key, features=features)

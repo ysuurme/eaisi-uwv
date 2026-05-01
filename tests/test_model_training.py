@@ -11,7 +11,7 @@ class TestModelTraining(unittest.TestCase):
         self.table_name = "fake_table"
         self.target = "target_col"
         self.mock_df = pd.DataFrame({
-            "Perioden_dt": pd.date_range("2020-01-01", periods=10, freq="ME"),
+            "period_enddate": pd.date_range("2020-01-01", periods=10, freq="ME"),
             "feat1": [float(i) for i in range(10)],
             "target_col": [0.1 * i for i in range(10)],
             "silver_id": range(10)
@@ -29,7 +29,7 @@ class TestModelTraining(unittest.TestCase):
     @patch("src.ml_engineering.model_training.mlflow")
     def test_model_trainer(self, mock_mlflow):
         mock_mlflow.start_run.return_value.__enter__.return_value.info.run_id = "test_run"
-        trainer = ModelTrainer(experiment_name="test_exp")
+        trainer = ModelTrainer(experiment_name="test_exp", engine=MagicMock())
         
         from sklearn.linear_model import LinearRegression
         exp = ModelExperiment(name="test", estimator=LinearRegression(), param_grid={"copy_X": [True]})

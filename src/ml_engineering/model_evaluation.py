@@ -2,8 +2,6 @@
 Model Evaluator for the ML Layer.
 Uses SQLAlchemy ORM and Persistent Sessions to resolve e3q8 (DetachedInstanceError).
 """
-import logging
-import json
 import skops.io as sio
 import pandas as pd
 from pathlib import Path
@@ -17,14 +15,15 @@ from sqlalchemy.sql import func
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_EVAL
+    from src.config import DIR_DB_EVAL, PROJECT_ROOT
 except ImportError:
-    raise ImportError("Configuration file 'config.py' not found.")
+    raise ImportError("Configuration file 'src/config.py' not found.")
 
-# Centralised MLflow tracking
-mlflow.set_tracking_uri(f"sqlite:///{DIR_DB_EVAL}")
+# --- Logging ---
+from src.utils.m_log import f_log
 
-logger = logging.getLogger(__name__)
+# MLflow tracking configuration is injected dynamically to avoid side effects.
+
 
 # --- ORM Model Definitions ---
 class Base(DeclarativeBase):
@@ -49,16 +48,24 @@ class ModelEvaluator:
 
     def __init__(self, db_eval_path: Path = DIR_DB_EVAL):
         self.db_eval_path = db_eval_path
-        # Use high timeout and WAL mode for concurrent MLflow + ORM access
+        
+        # Ensure the evaluation data directory exists so SQLite doesn't crash structurally
+        if isinstance(self.db_eval_path, Path):
+            self.db_eval_path.parent.mkdir(parents=True, exist_ok=True)
+            
         self.engine = create_engine(
-            f"sqlite:///{self.db_eval_path}",
+            f"sqlite:///{self.db_eval_path.as_posix()}",
             connect_args={"timeout": 30} 
         )
+        
+        # Configure MLflow tracking for evaluation
+        rel_db_eval = self.db_eval_path.relative_to(PROJECT_ROOT).as_posix()
+        mlflow.set_tracking_uri(f"sqlite:///{rel_db_eval}?timeout=30")
+        
         self._init_db()
 
     def _init_db(self):
         """Ensures the evaluation table exists and WAL mode is enabled."""
-        # Enable WAL mode for concurrency
         with self.engine.connect() as conn:
             conn.execute(text("PRAGMA journal_mode=WAL"))
             conn.commit()
@@ -101,7 +108,6 @@ class ModelEvaluator:
             passed_gate = r2 >= threshold_r2
             model_blob = sio.dumps(best_model)
             
-            # ORM record creation
             record = ModelEvaluationRecord(
                 run_id=run_id,
                 model_name=model_name,
@@ -112,9 +118,10 @@ class ModelEvaluator:
                 model_blob=model_blob
             )
             
-            # Merge ensures we handle existing run IDs gracefully
             session.merge(record)
-            session.commit() # Commit immediately to release SQLite write lock for MLflow
+            session.commit()
 
-            logger.info(f"Gate: {'PASS' if passed_gate else 'FAIL'} (R2: {r2:.4f}). Record committed to Session.")
+            gate_result = "PASS" if passed_gate else "FAIL"
+            f_log(f"Gate: {gate_result} | R2: {r2:.4f}", c_type="success" if passed_gate else "gate_fail")
+            f_log(f"Model stored | eval_data.db", c_type="store")
             return passed_gate

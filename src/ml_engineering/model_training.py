@@ -7,7 +7,6 @@ Responsible for:
 """
 import os
 import json
-import logging
 import pandas as pd
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,16 +23,21 @@ from src.ml_engineering.model_configs import ModelExperiment
 
 # --- Configuration ---
 try:
-    from config import DIR_DB_GOLD, ML_TARGET_COLUMN, DIR_DB_EVAL
+    from src.config import DIR_DB_GOLD, ML_TARGET_COLUMN, DIR_DB_EVAL, PROJECT_ROOT
 except ImportError:
-    raise ImportError("Configuration file 'config.py' not found.")
+    raise ImportError("Configuration file 'src/config.py' not found.")
 
-# Global enforcement of SQLite tracking
-db_uri = f"sqlite:///{DIR_DB_EVAL}?timeout=30"
-os.environ["MLFLOW_TRACKING_URI"] = db_uri
-mlflow.set_tracking_uri(db_uri)
+# --- Logging ---
+from src.utils.m_log import f_log
 
-logger = logging.getLogger(__name__)
+def configure_mlflow(db_eval_path: Path, project_root: Path) -> str:
+    """Configures MLflow tracking URI explicitly and returns the URI."""
+    rel_db_eval = db_eval_path.relative_to(project_root).as_posix()
+    db_uri = f"sqlite:///{rel_db_eval}?timeout=30"
+    os.environ["MLFLOW_TRACKING_URI"] = db_uri
+    mlflow.set_tracking_uri(db_uri)
+    return db_uri
+
 
 # --- ORM Model Definitions ---
 class Base(DeclarativeBase):
@@ -54,7 +58,7 @@ class DatasetLoader:
     def __init__(self, db_path: Path, table_name: str):
         self.db_path = db_path
         self.table_name = table_name
-        self.engine = create_engine(f"sqlite:///{self.db_path}")
+        self.engine = create_engine(f"sqlite:///{self.db_path.as_posix()}")
 
     def load_and_split(
         self, 
@@ -63,7 +67,7 @@ class DatasetLoader:
         n_splits: int = 5
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Dict[str, Any]]:
         df = pd.read_sql_table(self.table_name, self.engine)
-        df = df.dropna(subset=[target_column]).sort_values("Perioden_dt").reset_index(drop=True)
+        df = df.sort_values("period_enddate").reset_index(drop=True)
         y = df[target_column].astype(float)
         
         if features:
@@ -87,16 +91,15 @@ class ModelTrainer:
     def __init__(self, experiment_name: str, db_eval_path: Path = DIR_DB_EVAL, engine: Optional[Any] = None):
         self.experiment_name = experiment_name
         self.db_eval_path = db_eval_path
-        # Use provided engine or create a new high-concurrency one
         self.engine_eval = engine or create_engine(
-            f"sqlite:///{self.db_eval_path}",
+            f"sqlite:///{self.db_eval_path.as_posix()}",
             connect_args={"timeout": 30}
         )
         
-        mlflow.set_tracking_uri(f"sqlite:///{self.db_eval_path}")
-        # Ensure experiment exists in DB
+        configure_mlflow(self.db_eval_path, PROJECT_ROOT)
+        
         if not mlflow.get_experiment_by_name(self.experiment_name):
-            mlflow.create_experiment(self.experiment_name)
+            mlflow.create_experiment(self.experiment_name, artifact_location="./mlruns")
         mlflow.set_experiment(self.experiment_name)
         
         # Autolog params and metrics to DB, but strictly no artifacts
@@ -124,7 +127,7 @@ class ModelTrainer:
             cv_results_json=json.dumps(serializable_results)
         )
         session.merge(record)
-        session.commit() # Commit immediately to release SQLite write lock for MLflow
+        session.commit()
 
     def train_experiment(
         self, 
@@ -141,7 +144,7 @@ class ModelTrainer:
             mlflow.set_tags({"data_source": lineage["dataset"], "target": lineage["target"]})
             
             if experiment.param_grid:
-                logger.info(f"Tuning {experiment.name}...")
+                f_log(f"Tuning {experiment.name}...", c_type="process")
                 tscv = TimeSeriesSplit(n_splits=5)
                 grid_search = GridSearchCV(experiment.estimator, experiment.param_grid, cv=tscv, scoring="neg_mean_squared_error", n_jobs=-1)
                 grid_search.fit(x_train, y_train)
@@ -152,7 +155,6 @@ class ModelTrainer:
                 best_model.fit(x_train, y_train)
 
             # --- RESTORE UI VISIBILITY ---
-            # Explicit Model Logging (Enables Model Registry and UI visibility)
             signature = infer_signature(x_train, best_model.predict(x_train.head(5)))
             
             # Manual environment to bypass MLflow's failing pip discovery (solved via UV)
@@ -173,7 +175,6 @@ class ModelTrainer:
                 ],
             }
 
-            # We use skops for the internal MLflow log as well to match our DB storage
             mlflow.sklearn.log_model(
                 sk_model=best_model,
                 name="model",
@@ -183,5 +184,5 @@ class ModelTrainer:
                 serialization_format="skops"
             )
 
-            logger.info(f"✅ Training complete for {run_name}. Model logged to MLflow UI.")
+            f_log(f"Training complete | Run: {run_name}", c_type="success")
             return best_model, run_id

@@ -1,8 +1,13 @@
 # raw data
 data/0_raw/*
+data/1_bronze/*
+data/2_silver/*
+data/3_gold/*
+data/4_eval/*
 
 # MLFlow trained models (binary, large)
 mlruns/
+log/*
 
 # Python-generated files
 __pycache__/
@@ -17,9 +22,8 @@ wheels/
 
 # Workspace
 .env
+.github
 eaisi-uwv.code-workspace
 GEMINI.md
-
-
-
-
+TODO.md
+Taskfile.yml
