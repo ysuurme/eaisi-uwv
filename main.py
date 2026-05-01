@@ -39,7 +39,7 @@ def main() -> None:
         run_data_pipeline()
 
     gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
-    model_key = sys.argv[2] if len(sys.argv) > 2 else "random_forest"
+    model_key = sys.argv[2] if len(sys.argv) > 2 else "linear"
     feature_groups = sys.argv[3].split(",") if len(sys.argv) > 3 else None
 
     f_log(
