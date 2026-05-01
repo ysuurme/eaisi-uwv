@@ -68,33 +68,62 @@ class FeatureGroup:
     description: str
 
 
-# Placeholder column names — fill in with actual gold DB column names after running
-# discovery mode (uv run main.py master_data_ml_preprocessed random_forest) and
-# inspecting the logged feature count to confirm which columns are available.
 FEATURE_CATALOG: Dict[str, FeatureGroup] = {
-    "temporal": FeatureGroup(
-        name="temporal",
-        columns=["year", "quarter", "trend_index"],
-        source_table="derived",
-        description="Engineered time features: calendar year, quarter, and a linear trend index.",
-    ),
-    "labor_market": FeatureGroup(
-        name="labor_market",
+    "compensation": FeatureGroup(
+        name="compensation",
         columns=[
-            # TODO: replace with actual column names from master_data_ml_preprocessed
-            # e.g. "unemployment_rate", "employment_pct", "labor_participation_rate"
+            "BeloningVanWerknemers_5",
+            "BeloningPerArbeidsjaar_14",
+            "BeloningPerGewerktUur_17",
+            "Lonen_6",
+            "LonenPerArbeidsjaar_15",
+            "LonenPerGewerktUur_18",
+            "LoonkostenPerArbeidsjaar_16",
+            "LoonkostenPerGewerktUur_19",
         ],
         source_table="83415NED",
-        description="Labor market indicators: employment and unemployment rates by sector.",
+        description="Wage and labour cost indicators per worker, per hour and in total.",
     ),
-    "stress_indicators": FeatureGroup(
-        name="stress_indicators",
+    "labor_volume": FeatureGroup(
+        name="labor_volume",
         columns=[
-            # TODO: replace with actual column names from master_data_ml_preprocessed
-            # e.g. "stress_rate", "burnout_rate", "work_pressure_index"
+            "Arbeidsjaren_3_3000_A045285",
+            "BetaaldeOverwerkuren_24",
+            "GewerkteUren_26",
+            "GewerkteUren_3_A045285_4000",
+            "GewerkteUren_4_3000_A045286",
+            "GewerkteUren_5_A045285",
+            "GewerkteUren_5_A045286",
+            "GewerkteUrenPerWerkzamePersoon_4_A045286_4000",
+            "GewerkteUrenPerWerkzamePersoon_9_A045285_3000",
+            "GewerkteUrenPerWerkzamePersoon_9_A045286_3000",
+            "GewerkteUrenPerWerkzamePersoon_9_A045286_4000",
+        ],
+        source_table="83415NED",
+        description="Hours worked and overtime by sector and employee category.",
+    ),
+    "workforce": FeatureGroup(
+        name="workforce",
+        columns=[
+            "Totaal_36",
+            "Vrouwen_32",
+            "WerkzamePersonen_6_A045285_3000",
+            "WerkzamePersonen_7_A045285",
+            "WerkzamePersonen_7_A045286",
+            "WerkzamePersonenSeizoengecorrigeerd_9_A045285",
+            "WerkzamePersonenSeizoengecorrigeerd_9_A045286",
+        ],
+        source_table="83415NED",
+        description="Number of employed persons, seasonally adjusted, by gender and category.",
+    ),
+    "working_conditions": FeatureGroup(
+        name="working_conditions",
+        columns=[
+            "GeenRepeterendeBewegingTijdensWerk_33_MBG0095",
+            "LichamelijkGeweld_76_MOG0095",
         ],
         source_table="83157NED",
-        description="Work-related stress and burnout indicators by sector.",
+        description="NEA survey indicators: repetitive movement absence and physical violence at work.",
     ),
 }
 
@@ -126,19 +155,19 @@ class ModelConfiguration:
         "baseline": ModelExperiment(
             name="Baseline_Mean",
             estimator=DummyRegressor(strategy="mean"),
-            feature_groups=None,
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
             description="Naïve baseline predicting the training set mean."
         ),
         "linear": ModelExperiment(
             name="LinearRegression",
             estimator=LinearRegression(),
-            feature_groups=["temporal", "labor_market", "stress_indicators"],
-            description="Simple regressor using temporal and labor market features."
+            feature_groups=["compensation", "working_conditions"],
+            description="Linear regressor on the most interpretable compensation and conditions features."
         ),
         "random_forest": ModelExperiment(
             name="RandomForest",
             estimator=RandomForestRegressor(random_state=42),
-            feature_groups=None,
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
             param_grid={
                 "n_estimators": [100, 200],
                 "max_depth": [5, 10, None],
@@ -148,7 +177,7 @@ class ModelConfiguration:
         "gradient_boosting": ModelExperiment(
             name="GradientBoosting",
             estimator=GradientBoostingRegressor(random_state=42),
-            feature_groups=None,
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
             param_grid={
                 "n_estimators": [100, 200],
                 "learning_rate": [0.05, 0.1, 0.2],
@@ -158,7 +187,7 @@ class ModelConfiguration:
         "hist_gradient_boosting": ModelExperiment(
             name="HistGradientBoosting",
             estimator=HistGradientBoostingRegressor(random_state=42),
-            feature_groups=None,
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
             param_grid={
                 "learning_rate": [0.05, 0.1, 0.2],
                 "max_iter": [100, 300],

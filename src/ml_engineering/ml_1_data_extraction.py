@@ -17,8 +17,14 @@ from sqlalchemy import create_engine
 from src.ml_engineering.model_configs import FEATURE_CATALOG
 from src.utils.m_log import f_log
 
-# Columns that are never treated as ML features regardless of selection mode
-_STRUCTURAL_COLUMNS = {"silver_id", "period_enddate", "BedrijfstakkenBranchesSBI2008"}
+# Kept in the output as structural context (date, sector key, temporal indices)
+_KEEP_STRUCTURAL = {"period_enddate", "BedrijfstakkenBranchesSBI2008", "year", "quarter"}
+
+# Silently dropped — pipeline artefacts with no ML or context value
+_DROP_ALWAYS = {"silver_id"}
+
+# Union used to exclude from the feature column lists
+_STRUCTURAL_COLUMNS = _KEEP_STRUCTURAL | _DROP_ALWAYS
 
 
 class DataExtractor:
@@ -59,7 +65,7 @@ class DataExtractor:
             ]
             mode = "discovery"
 
-        structural_present = [c for c in df.columns if c in _STRUCTURAL_COLUMNS]
+        structural_present = [c for c in df.columns if c in _KEEP_STRUCTURAL]
         columns_to_keep = structural_present + [target_column] + feature_columns
         df = df[[c for c in columns_to_keep if c in available_columns]]
 
