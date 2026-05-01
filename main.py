@@ -1,11 +1,24 @@
 """
 Main Entry Point for EAISI UWV ML Pipeline.
-Usage: python main.py <gold_table> <model_key> [group1,group2,...]
+
+Usage
+-----
+All-industry mode (default):
+    python main.py <gold_table> <model_key> [sbi_filter_col] [group1,group2,...]
+
+Sector-specific mode:
+    python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
+
+Examples:
+    python main.py master_data_ml_preprocessed baseline
+    python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
+    python main.py master_data_ml_preprocessed random_forest - compensation,labor_volume
+    (use '-' as sbi_filter_col placeholder to skip it and specify feature groups)
 """
 import sys
 
 from src.config import START_MLFLOW_UI
-from src.ml_engineering.ml_orchestrator import run_pipeline
+from src.ml_engineering.ml_orchestrator import run_pipeline, run_sector_sweep
 from src.utils.m_log import setup_logging, f_log
 from src.utils.m_mlflow_ui import ensure_mlflow_ui
 
@@ -38,12 +51,16 @@ def main() -> None:
         sys.argv.remove("--refresh-data")
         run_data_pipeline()
 
-    gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
-    model_key = sys.argv[2] if len(sys.argv) > 2 else "linear"
-    feature_groups = sys.argv[3].split(",") if len(sys.argv) > 3 else None
+    gold_table    = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+    model_key     = sys.argv[2] if len(sys.argv) > 2 else "linear"
+    # arg 3: sbi_filter_col — use '-' as a placeholder to skip (means all-industry)
+    sbi_raw       = sys.argv[3] if len(sys.argv) > 3 else None
+    sbi_filter_col = sbi_raw if (sbi_raw and sbi_raw != "-") else None
+    feature_groups = sys.argv[4].split(",") if len(sys.argv) > 4 else None
 
     f_log(
-        f"Starting ML Lifecycle | Table: {gold_table} | Model: {model_key} | Groups: {feature_groups or 'ALL'}",
+        f"Starting ML Lifecycle | Table: {gold_table} | Model: {model_key} | "
+        f"SBI: {sbi_filter_col or 'all-industry'} | Groups: {feature_groups or 'ALL'}",
         c_type="start",
     )
 
@@ -51,11 +68,19 @@ def main() -> None:
         ensure_mlflow_ui()
 
     try:
-        run_pipeline(
-            experiment_key=model_key,
-            gold_table=gold_table,
-            feature_groups=feature_groups,
-        )
+        if "--all-sectors" in sys.argv:
+            run_sector_sweep(
+                experiment_key=model_key,
+                gold_table=gold_table,
+                feature_groups=feature_groups,
+            )
+        else:
+            run_pipeline(
+                experiment_key=model_key,
+                gold_table=gold_table,
+                sbi_filter_col=sbi_filter_col,
+                feature_groups=feature_groups,
+            )
     except Exception:
         sys.exit(1)
 

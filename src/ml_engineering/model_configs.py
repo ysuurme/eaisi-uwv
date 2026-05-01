@@ -4,19 +4,25 @@ Centralized ML Configuration Module.
 Single source of truth for:
 - ORM Base class (unified metadata registry for all ML tables)
 - ORM table definitions (tuning results, evaluation records)
+- Domain-specific baseline forecaster (SectorQuarterRollingMean)
 - Feature catalog (named feature groups with source metadata)
 - Estimator configurations (ModelConfiguration catalog)
 """
+import numpy as np
+import pandas as pd
+import polars as pl
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from sklearn.dummy import DummyRegressor
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.ensemble import (
     GradientBoostingRegressor,
     HistGradientBoostingRegressor,
     RandomForestRegressor,
 )
 from sklearn.linear_model import LinearRegression
+from sktime.forecasting.compose import make_reduction
+from sktime.forecasting.fbprophet import Prophet
 from sqlalchemy import String, Float, LargeBinary, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -53,6 +59,102 @@ class ModelEvaluationRecord(Base):
     passed_gate: Mapped[Optional[int]] = mapped_column(Float)
     model_blob: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Domain-Specific Baseline Forecaster
+# ---------------------------------------------------------------------------
+
+class SectorQuarterRollingMean(BaseEstimator, RegressorMixin):
+    """
+    Domain-specific baseline forecaster for quarterly sick leave prediction.
+
+    For each (SBI sector, quarter) group, predicts the mean of the same quarter
+    over the previous n_years, using a no-leakage shift(1) partitioned by sector
+    and quarter. Computed via Polars for performance.
+
+    Formula:
+        ŷ_t = mean(y_{t-1}, y_{t-2}, y_{t-3})   for the same quarter Q and sector S
+
+    Using .over(["sbi_col", "quarter_col"]) ensures each (sector, quarter)
+    combination is averaged independently. shift(1) prevents look-ahead bias
+    — the current quarter's value is excluded from its own prediction.
+    """
+
+    def __init__(
+        self,
+        n_years: int = 3,
+        sbi_col: str = "BedrijfstakkenBranchesSBI2008",
+        quarter_col: str = "quarter",
+    ):
+        self.n_years = n_years
+        self.sbi_col = sbi_col
+        self.quarter_col = quarter_col
+        self._lookup: Dict[tuple, float] = {}
+        self._global_mean: float = 0.0
+
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "SectorQuarterRollingMean":
+        """
+        Learns the rolling mean lookup from training data.
+
+        Groups by (sbi_col, quarter_col) when sbi_col is present in X;
+        falls back to quarter_col-only grouping if sbi_col is absent
+        (e.g. when SBI sector is encoded as OHE columns rather than a text column).
+
+        Args:
+            X: DataFrame containing at least quarter_col; sbi_col is optional.
+            y: Target series (sick leave percentage).
+        """
+        has_sbi = self.sbi_col in X.columns
+        group_cols = [self.sbi_col, self.quarter_col] if has_sbi else [self.quarter_col]
+
+        df = X[group_cols].copy()
+        df["_target"] = y.values
+
+        over_cols = group_cols  # Polars .over() partition
+        lf = (
+            pl.from_pandas(df)
+            .with_columns(
+                pl.col("_target")
+                .shift(1)                          # no look-ahead: exclude current row
+                .rolling_mean(
+                    window_size=self.n_years,
+                    min_samples=self.n_years,      # match notebook: no prediction until n_years full observations exist
+                )
+                .over(over_cols)
+                .alias("_rolling_mean")
+            )
+        )
+        result = lf.select(group_cols + ["_rolling_mean"]).to_pandas()
+
+        # Build lookup: (sbi_code, quarter) → predicted rolling mean
+        # Falls back to (quarter,) key tuple when sbi_col is absent
+        self._lookup = {}
+        for _, row in result.dropna(subset=["_rolling_mean"]).iterrows():
+            if has_sbi:
+                key = (row[self.sbi_col], int(row[self.quarter_col]))
+            else:
+                key = (int(row[self.quarter_col]),)
+            self._lookup[key] = float(row["_rolling_mean"])
+
+        self._global_mean = float(y.mean())
+        self._has_sbi = has_sbi
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Predicts using the learned rolling mean lookup.
+        Falls back to global training mean for unseen key combinations.
+        """
+        has_sbi = getattr(self, "_has_sbi", self.sbi_col in X.columns)
+        preds = []
+        for _, row in X.iterrows():
+            if has_sbi:
+                key = (row.get(self.sbi_col), int(row.get(self.quarter_col, 0)))
+            else:
+                key = (int(row.get(self.quarter_col, 0)),)
+            preds.append(self._lookup.get(key, self._global_mean))
+        return np.array(preds)
 
 
 # ---------------------------------------------------------------------------
@@ -146,55 +248,81 @@ class ModelConfiguration:
     """Catalog of available estimator configurations.
 
     Usage:
-        config = ModelConfiguration.get("linear")
-        config.estimator  # LinearRegression()
+        config = ModelConfiguration.get("baseline")
+        config.estimator  # SectorQuarterRollingMean()
         config.feature_groups  # None = discovery mode
+
+    Baseline:
+        SectorQuarterRollingMean — rolling 3-year same-quarter mean per SBI sector.
+        Domain-specific, interpretable, and leakage-free benchmark.
+
+    Reducers (sktime make_reduction):
+        Wraps sklearn regressors into recursive lag-window forecasters.
+        param_grid uses 'estimator__' prefix for underlying model params.
+        'window_length' is tunable to find the optimal lag window.
     """
 
     _CATALOG: Dict[str, ModelExperiment] = {
         "baseline": ModelExperiment(
-            name="Baseline_Mean",
-            estimator=DummyRegressor(strategy="mean"),
-            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
-            description="Naïve baseline predicting the training set mean."
+            name="SectorQuarterRollingMean",
+            estimator=SectorQuarterRollingMean(n_years=3),
+            param_grid={},
+            feature_groups=None,  # uses sbi_col + quarter_col from X; no catalog groups needed
+            description="Rolling 3-year same-quarter mean per SBI sector. No look-ahead bias.",
         ),
         "linear": ModelExperiment(
-            name="LinearRegression",
-            estimator=LinearRegression(),
+            name="LinearRegression_Reduced",
+            estimator=make_reduction(LinearRegression(), window_length=12, strategy="recursive"),
+            param_grid={"window_length": [8, 12, 16]},
             feature_groups=["compensation", "working_conditions"],
-            description="Linear regressor on the most interpretable compensation and conditions features."
+            description="LinearRegression via make_reduction recursive lag-window forecaster.",
         ),
         "random_forest": ModelExperiment(
-            name="RandomForest",
-            estimator=RandomForestRegressor(random_state=42),
-            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
+            name="RandomForest_Reduced",
+            estimator=make_reduction(
+                RandomForestRegressor(random_state=42), window_length=12, strategy="recursive"
+            ),
             param_grid={
-                "n_estimators": [100, 200],
-                "max_depth": [5, 10, None],
+                "window_length": [8, 12],
+                "estimator__n_estimators": [100, 200],
+                "estimator__max_depth": [5, 10, None],
             },
-            description="Random Forest Regressor (6 combos x 5 folds = 30 fits)."
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
+            description="RandomForest via make_reduction (recursive). 12 combos x CV folds.",
         ),
         "gradient_boosting": ModelExperiment(
-            name="GradientBoosting",
-            estimator=GradientBoostingRegressor(random_state=42),
-            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
+            name="GradientBoosting_Reduced",
+            estimator=make_reduction(
+                GradientBoostingRegressor(random_state=42), window_length=12, strategy="recursive"
+            ),
             param_grid={
-                "n_estimators": [100, 200],
-                "learning_rate": [0.05, 0.1, 0.2],
+                "window_length": [8, 12],
+                "estimator__n_estimators": [100, 200],
+                "estimator__learning_rate": [0.05, 0.1],
             },
-            description="Gradient Boosting Regressor (6 combos x 5 folds = 30 fits)."
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
+            description="GradientBoosting via make_reduction (recursive).",
         ),
         "hist_gradient_boosting": ModelExperiment(
-            name="HistGradientBoosting",
-            estimator=HistGradientBoostingRegressor(random_state=42),
-            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
+            name="HistGradientBoosting_Reduced",
+            estimator=make_reduction(
+                HistGradientBoostingRegressor(random_state=42), window_length=12, strategy="recursive"
+            ),
             param_grid={
-                "learning_rate": [0.05, 0.1, 0.2],
-                "max_iter": [100, 300],
-                "max_leaf_nodes": [30, 60],
+                "window_length": [8, 12],
+                "estimator__learning_rate": [0.05, 0.1],
+                "estimator__max_iter": [100, 300],
             },
-            description="Histogram-based Gradient Boosting (12 combos x 5 folds = 60 fits)."
-        )
+            feature_groups=["compensation", "labor_volume", "workforce", "working_conditions"],
+            description="HistGradientBoosting via make_reduction (recursive).",
+        ),
+        "prophet": ModelExperiment(
+            name="Prophet",
+            estimator=Prophet(),
+            param_grid={},
+            feature_groups=["compensation", "labor_volume"],
+            description="Meta Prophet: additive trend + quarterly seasonality. Exogenous features supported.",
+        ),
     }
 
     @classmethod

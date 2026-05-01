@@ -62,10 +62,14 @@ def _check_target_present(df: pd.DataFrame, target_column: str) -> None:
 
 
 def _check_date_column(df: pd.DataFrame) -> None:
-    """Temporal key must be present for time-series splitting."""
+    """Temporal key must be present and parseable as datetime for time-series splitting."""
     if DATE_COL not in df.columns:
         raise ValueError(f"Required column '{DATE_COL}' missing from dataset.")
-    f_log(f"✅ '{DATE_COL}' column present.", c_type="success")
+    try:
+        pd.to_datetime(df[DATE_COL])
+        f_log(f"✅ '{DATE_COL}' present and parseable as datetime.", c_type="success")
+    except Exception as e:
+        raise ValueError(f"'{DATE_COL}' cannot be parsed as datetime: {e}")
 
 
 def _check_duplicates(df: pd.DataFrame) -> None:

@@ -20,6 +20,8 @@ import mlflow.sklearn
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from sqlalchemy import inspect as sa_inspect
+
 from src.config import DIR_DB_GOLD, DIR_DB_EVAL, ML_TARGET_COLUMN, PROJECT_ROOT
 from src.ml_engineering.model_configs import Base, ModelConfiguration
 
@@ -62,6 +64,7 @@ def run_pipeline(
     experiment_key: str,
     gold_table: str = "master_data_ml_preprocessed",
     feature_groups: Optional[List[str]] = None,
+    sbi_filter_col: Optional[str] = None,
     threshold_r2: float = 0.2,
 ) -> None:
     """MLOps Level 0: Manual ML Pipeline.
@@ -70,15 +73,26 @@ def run_pipeline(
         experiment_key: Key in ModelConfiguration catalog (e.g. "linear", "random_forest").
         gold_table: Name of the preprocessed table in the gold feature store.
         feature_groups: Named feature groups from FEATURE_CATALOG. None = all columns.
+        sbi_filter_col: OHE column for sector-specific mode, e.g.
+            ``'BedrijfskenmerkenSBI2008_301000'``.  None = all-industry mode
+            (aggregate across all sectors to one quarterly series).
         threshold_r2: Minimum R² score to pass the quality gate.
     """
     # --- Select Estimator ---
     config = ModelConfiguration.get(experiment_key)
     dataset_id = gold_table.replace("master_data_ml_preprocessed", "master")
-    experiment_name = f"{dataset_id}_SickLeave"
-    model_name = f"{config.name}_{dataset_id}"
+    # Derive a short sector label for run naming and MLflow tags
+    sector_label = (
+        sbi_filter_col.replace("BedrijfskenmerkenSBI2008_", "")
+        if sbi_filter_col else "T001081"
+    )
+    experiment_name = f"{dataset_id}_SickLeave_4Q"
+    model_name = f"{config.name}_{sector_label}"
 
-    f_log(f"Pipeline start | Model: {model_name} | Table: {gold_table}", c_type="start")
+    f_log(
+        f"Pipeline start | Model: {config.name} | Sector: {sector_label} | Table: {gold_table}",
+        c_type="start",
+    )
 
     # --- Infrastructure ---
     _configure_mlflow(DIR_DB_EVAL)
@@ -89,7 +103,10 @@ def run_pipeline(
     if not mlflow.get_experiment_by_name(experiment_name):
         mlflow.create_experiment(experiment_name, artifact_location="./mlruns")
     mlflow.set_experiment(experiment_name)
-    mlflow.sklearn.autolog(log_models=False, log_datasets=False, log_input_examples=False)
+    # Disable autolog: sktime make_reduction wraps sklearn internals and sklearn
+    # autolog would intercept those inner fits, producing duplicate/noisy run entries.
+    # All params, metrics, and artifacts are logged explicitly in Steps 4 and 5.
+    mlflow.sklearn.autolog(disable=True)
 
     # --- Step 1: Data Extraction ---
     f_log("Step 1 | Extracting data from gold feature store...", c_type="process")
@@ -97,7 +114,11 @@ def run_pipeline(
 
     # Config-defined groups take precedence over CLI-passed groups
     active_groups = config.feature_groups if config.feature_groups is not None else feature_groups
-    raw_df = extractor.extract(target_column=ML_TARGET_COLUMN, feature_groups=active_groups)
+    raw_df = extractor.extract(
+        target_column=ML_TARGET_COLUMN,
+        feature_groups=active_groups,
+        sbi_filter_col=sbi_filter_col,
+    )
 
     # --- Step 2: Data Validation (pre-preparation) ---
     f_log("Step 2 | Validating extracted data...", c_type="process")
@@ -120,7 +141,8 @@ def run_pipeline(
             trainer = ModelTrainer(session=session)
             fitted_model, run_id = trainer.train(
                 experiment=config, x_train=x_train, y_train=y_train,
-                run_name=f"{config.name}_Run", lineage=lineage,
+                run_name=f"{config.name}_{sector_label}",
+                lineage={**lineage, "sector": sector_label},
             )
 
             # --- Step 5: Model Evaluation ---
@@ -141,8 +163,8 @@ def run_pipeline(
             passed = validator.validate_and_register(
                 run_id=run_id, model_name=model_name, metrics=metrics,
                 threshold_r2=threshold_r2,
-                tags={"data_source": gold_table, "status": "candidate"},
-                description=f"Model {model_name} trained on {gold_table}.",
+                tags={"data_source": gold_table, "sector": sector_label, "status": "candidate"},
+                description=f"Model {model_name} | sector={sector_label} | 4Q ahead.",
             )
 
             if passed:
@@ -156,8 +178,64 @@ def run_pipeline(
             raise
 
 
+def run_sector_sweep(
+    experiment_key: str,
+    gold_table: str = "master_data_ml_preprocessed",
+    feature_groups: Optional[List[str]] = None,
+    threshold_r2: float = 0.2,
+) -> None:
+    """Runs the pipeline for every OHE SBI sector column found in the gold table.
+
+    Discovers all columns that match 'BedrijfskenmerkenSBI2008_*' at runtime
+    and calls ``run_pipeline`` once per sector.  Results land in the same
+    MLflow experiment, each run tagged with its sector label, enabling
+    side-by-side comparison across all sectors in the MLflow UI.
+
+    Args:
+        experiment_key: Key in ModelConfiguration catalog.
+        gold_table: Name of the preprocessed table in the gold feature store.
+        feature_groups: Named feature groups from FEATURE_CATALOG.  None = all.
+        threshold_r2: Minimum R² to pass the quality gate per sector.
+    """
+    discovery_engine = create_engine(f"sqlite:///{DIR_DB_GOLD.as_posix()}")
+    columns = sa_inspect(discovery_engine).get_columns(gold_table)
+    sbi_cols = sorted(
+        c["name"] for c in columns
+        if c["name"].startswith("BedrijfskenmerkenSBI2008_")
+    )
+
+    f_log(
+        f"Sector sweep | {len(sbi_cols)} sectors found | Model: {experiment_key}",
+        c_type="start",
+    )
+
+    for i, sbi_col in enumerate(sbi_cols, 1):
+        sector_label = sbi_col.replace("BedrijfskenmerkenSBI2008_", "")
+        f_log(
+            f"Sector {i}/{len(sbi_cols)}: {sector_label}",
+            c_type="process",
+        )
+        try:
+            run_pipeline(
+                experiment_key=experiment_key,
+                gold_table=gold_table,
+                sbi_filter_col=sbi_col,
+                feature_groups=feature_groups,
+                threshold_r2=threshold_r2,
+            )
+        except Exception as exc:
+            # Log and continue — one bad sector should not abort the sweep
+            f_log(f"Sector {sector_label} failed: {exc}", c_type="error")
+
+    f_log("Sector sweep complete.", c_type="complete")
+
+
 if __name__ == "__main__":
     from src.utils.m_log import setup_logging
     setup_logging()
 
+    # All-industry mode (default):
     run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed", threshold_r2=0.0)
+    # Sector-specific mode (example):
+    # run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed",
+    #              sbi_filter_col="BedrijfskenmerkenSBI2008_301000", threshold_r2=0.0)
