@@ -3,14 +3,22 @@ Step 1 — ML Data Extraction.
 
 Extracts feature data from the Gold database (feature store).
 The gold DB acts as the centralized feature store in this MLOps framework.
+
+Feature selection modes:
+    groups    — resolves named groups from FEATURE_CATALOG to concrete column names
+    discovery — uses all columns in the table except the target and structural keys
 """
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import pandas as pd
 from sqlalchemy import create_engine
 
+from src.ml_engineering.model_configs import FEATURE_CATALOG
 from src.utils.m_log import f_log
+
+# Columns that are never treated as ML features regardless of selection mode
+_STRUCTURAL_COLUMNS = {"silver_id", "period_enddate", "BedrijfstakkenBranchesSBI2008"}
 
 
 class DataExtractor:
@@ -24,34 +32,54 @@ class DataExtractor:
     def extract(
         self,
         target_column: str,
-        features: Optional[List[str]] = None,
+        feature_groups: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        """Loads the gold table and selects target + requested features.
+        """Loads the gold table and selects target + features.
 
         Args:
             target_column: Name of the ML target column.
-            features: Explicit feature list. If None, all numeric columns are used.
+            feature_groups: Named groups from FEATURE_CATALOG. If None, all columns
+                except the target and structural keys are used (discovery mode).
 
         Returns:
-            DataFrame sorted by period_enddate with target + features.
+            DataFrame sorted by period_enddate with target + selected features.
         """
         df = pd.read_sql_table(self.table_name, self.engine)
         df = df.sort_values("period_enddate").reset_index(drop=True)
 
-        if features:
-            f_log(f"Selecting {len(features)} features from config: {features[:5]}...", c_type="process")
-            columns_to_keep = [target_column] + features
-            if "period_enddate" in df.columns:
-                columns_to_keep = ["period_enddate"] + columns_to_keep
-            df = df[[c for c in columns_to_keep if c in df.columns]]
+        available_columns = set(df.columns)
+
+        if feature_groups is not None:
+            feature_columns = self._resolve_groups(feature_groups, available_columns)
+            mode = "groups"
         else:
-            f_log("No feature subset defined. Using Discovery Mode (all numeric columns).", c_type="process")
-            # Keep all numeric columns + period_enddate, drop structural keys
-            non_feature_cols = ["silver_id"]
-            df = df.drop(columns=[c for c in non_feature_cols if c in df.columns])
+            feature_columns = [
+                c for c in df.columns
+                if c != target_column and c not in _STRUCTURAL_COLUMNS
+            ]
+            mode = "discovery"
+
+        structural_present = [c for c in df.columns if c in _STRUCTURAL_COLUMNS]
+        columns_to_keep = structural_present + [target_column] + feature_columns
+        df = df[[c for c in columns_to_keep if c in available_columns]]
 
         f_log(
-            f"Extracted {df.shape[1]} columns, {df.shape[0]} rows from '{self.table_name}'",
+            f"Extraction complete | mode={mode} | features={len(feature_columns)} | rows={df.shape[0]}",
             c_type="success",
         )
         return df
+
+    def _resolve_groups(self, group_names: List[str], available_columns: set) -> List[str]:
+        """Resolves feature group names to column names, logging any gaps."""
+        resolved: List[str] = []
+        for group_name in group_names:
+            if group_name not in FEATURE_CATALOG:
+                f_log(f"Feature group '{group_name}' not found in FEATURE_CATALOG — skipped.", c_type="warning")
+                continue
+            group = FEATURE_CATALOG[group_name]
+            for col in group.columns:
+                if col in available_columns:
+                    resolved.append(col)
+                else:
+                    f_log(f"Column '{col}' from group '{group_name}' not in table — skipped.", c_type="warning")
+        return resolved

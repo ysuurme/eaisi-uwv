@@ -15,7 +15,7 @@ class TestMain(unittest.TestCase):
         mock_run.assert_called_once_with(
             experiment_key="linear",
             gold_table="test_gold",
-            features=None,
+            feature_groups=None,
         )
 
     @patch("main.run_pipeline")
@@ -30,7 +30,22 @@ class TestMain(unittest.TestCase):
         mock_run.assert_called_once_with(
             experiment_key="random_forest",
             gold_table="master_data_ml_preprocessed",
-            features=None,
+            feature_groups=None,
+        )
+
+    @patch("main.run_pipeline")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_feature_groups_parsed(self, mock_ui, mock_run):
+        """Verify CLI feature group names are split and passed correctly."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "my_table", "linear", "temporal,labor_market"]):
+            from main import main
+            main()
+
+        mock_run.assert_called_once_with(
+            experiment_key="linear",
+            gold_table="my_table",
+            feature_groups=["temporal", "labor_market"],
         )
 
 

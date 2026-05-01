@@ -1,6 +1,6 @@
 """
 Main Entry Point for EAISI UWV ML Pipeline.
-Usage: python main.py <gold_table> <model_key> [feature1,feature2,...]
+Usage: python main.py <gold_table> <model_key> [group1,group2,...]
 """
 import sys
 
@@ -40,10 +40,10 @@ def main() -> None:
 
     gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
     model_key = sys.argv[2] if len(sys.argv) > 2 else "random_forest"
-    features = sys.argv[3].split(",") if len(sys.argv) > 3 else None
+    feature_groups = sys.argv[3].split(",") if len(sys.argv) > 3 else None
 
     f_log(
-        f"Starting ML Lifecycle | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}",
+        f"Starting ML Lifecycle | Table: {gold_table} | Model: {model_key} | Groups: {feature_groups or 'ALL'}",
         c_type="start",
     )
 
@@ -54,7 +54,7 @@ def main() -> None:
         run_pipeline(
             experiment_key=model_key,
             gold_table=gold_table,
-            features=features,
+            feature_groups=feature_groups,
         )
     except Exception:
         sys.exit(1)

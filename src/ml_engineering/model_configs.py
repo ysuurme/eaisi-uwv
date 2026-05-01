@@ -4,6 +4,7 @@ Centralized ML Configuration Module.
 Single source of truth for:
 - ORM Base class (unified metadata registry for all ML tables)
 - ORM table definitions (tuning results, evaluation records)
+- Feature catalog (named feature groups with source metadata)
 - Estimator configurations (ModelConfiguration catalog)
 """
 from dataclasses import dataclass, field
@@ -55,6 +56,50 @@ class ModelEvaluationRecord(Base):
 
 
 # ---------------------------------------------------------------------------
+# Feature Catalog — named groups of features with source metadata
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FeatureGroup:
+    """A named, documented set of features originating from a single CBS source."""
+    name: str
+    columns: List[str]
+    source_table: str
+    description: str
+
+
+# Placeholder column names — fill in with actual gold DB column names after running
+# discovery mode (uv run main.py master_data_ml_preprocessed random_forest) and
+# inspecting the logged feature count to confirm which columns are available.
+FEATURE_CATALOG: Dict[str, FeatureGroup] = {
+    "temporal": FeatureGroup(
+        name="temporal",
+        columns=["year", "quarter", "trend_index"],
+        source_table="derived",
+        description="Engineered time features: calendar year, quarter, and a linear trend index.",
+    ),
+    "labor_market": FeatureGroup(
+        name="labor_market",
+        columns=[
+            # TODO: replace with actual column names from master_data_ml_preprocessed
+            # e.g. "unemployment_rate", "employment_pct", "labor_participation_rate"
+        ],
+        source_table="83415NED",
+        description="Labor market indicators: employment and unemployment rates by sector.",
+    ),
+    "stress_indicators": FeatureGroup(
+        name="stress_indicators",
+        columns=[
+            # TODO: replace with actual column names from master_data_ml_preprocessed
+            # e.g. "stress_rate", "burnout_rate", "work_pressure_index"
+        ],
+        source_table="83157NED",
+        description="Work-related stress and burnout indicators by sector.",
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # Estimator Configuration Dataclass + Catalog
 # ---------------------------------------------------------------------------
 
@@ -64,7 +109,7 @@ class ModelExperiment:
     name: str
     estimator: Any
     param_grid: Dict[str, List[Any]] = field(default_factory=dict)
-    features: Optional[List[str]] = None
+    feature_groups: Optional[List[str]] = None  # None = all columns (discovery mode)
     description: str = ""
 
 
@@ -74,26 +119,26 @@ class ModelConfiguration:
     Usage:
         config = ModelConfiguration.get("linear")
         config.estimator  # LinearRegression()
-        config.param_grid  # {}
+        config.feature_groups  # None = discovery mode
     """
 
     _CATALOG: Dict[str, ModelExperiment] = {
         "baseline": ModelExperiment(
             name="Baseline_Mean",
             estimator=DummyRegressor(strategy="mean"),
-            features=None,  # Uses all numeric features for context, though ignored by Dummy
+            feature_groups=None,
             description="Naïve baseline predicting the training set mean."
         ),
         "linear": ModelExperiment(
             name="LinearRegression",
             estimator=LinearRegression(),
-            features=["unemployment_rate", "stress_rate", "employment_pct"],  # Example subset
-            description="Simple regressor capturing the linear trend."
+            feature_groups=["temporal", "labor_market", "stress_indicators"],
+            description="Simple regressor using temporal and labor market features."
         ),
         "random_forest": ModelExperiment(
             name="RandomForest",
             estimator=RandomForestRegressor(random_state=42),
-            features=None,  # Discovery mode (all numeric features)
+            feature_groups=None,
             param_grid={
                 "n_estimators": [100, 200],
                 "max_depth": [5, 10, None],
@@ -103,7 +148,7 @@ class ModelConfiguration:
         "gradient_boosting": ModelExperiment(
             name="GradientBoosting",
             estimator=GradientBoostingRegressor(random_state=42),
-            features=None,
+            feature_groups=None,
             param_grid={
                 "n_estimators": [100, 200],
                 "learning_rate": [0.05, 0.1, 0.2],
@@ -113,7 +158,7 @@ class ModelConfiguration:
         "hist_gradient_boosting": ModelExperiment(
             name="HistGradientBoosting",
             estimator=HistGradientBoostingRegressor(random_state=42),
-            features=None,
+            feature_groups=None,
             param_grid={
                 "learning_rate": [0.05, 0.1, 0.2],
                 "max_iter": [100, 300],

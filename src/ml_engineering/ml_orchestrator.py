@@ -61,7 +61,7 @@ def _ensure_eval_db(engine) -> None:
 def run_pipeline(
     experiment_key: str,
     gold_table: str = "master_data_ml_preprocessed",
-    features: Optional[List[str]] = None,
+    feature_groups: Optional[List[str]] = None,
     threshold_r2: float = 0.2,
 ) -> None:
     """MLOps Level 0: Manual ML Pipeline.
@@ -69,7 +69,7 @@ def run_pipeline(
     Args:
         experiment_key: Key in ModelConfiguration catalog (e.g. "linear", "random_forest").
         gold_table: Name of the preprocessed table in the gold feature store.
-        features: Optional list of feature column names. None = all numeric columns.
+        feature_groups: Named feature groups from FEATURE_CATALOG. None = all columns.
         threshold_r2: Minimum R² score to pass the quality gate.
     """
     # --- Select Estimator ---
@@ -95,9 +95,9 @@ def run_pipeline(
     f_log("Step 1 | Extracting data from gold feature store...", c_type="process")
     extractor = DataExtractor(db_path=DIR_DB_GOLD, table_name=gold_table)
 
-    # Selection logic: Config-defined features > CLI-passed features > None (Discovery)
-    active_features = config.features if config.features is not None else features
-    raw_df = extractor.extract(target_column=ML_TARGET_COLUMN, features=active_features)
+    # Config-defined groups take precedence over CLI-passed groups
+    active_groups = config.feature_groups if config.feature_groups is not None else feature_groups
+    raw_df = extractor.extract(target_column=ML_TARGET_COLUMN, feature_groups=active_groups)
 
     # --- Step 2: Data Validation (pre-preparation) ---
     f_log("Step 2 | Validating extracted data...", c_type="process")
