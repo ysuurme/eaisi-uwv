@@ -39,11 +39,13 @@ class DataExtractor:
         df = df.sort_values("period_enddate").reset_index(drop=True)
 
         if features:
+            f_log(f"Selecting {len(features)} features from config: {features[:5]}...", c_type="process")
             columns_to_keep = [target_column] + features
             if "period_enddate" in df.columns:
                 columns_to_keep = ["period_enddate"] + columns_to_keep
             df = df[[c for c in columns_to_keep if c in df.columns]]
         else:
+            f_log("No feature subset defined. Using Discovery Mode (all numeric columns).", c_type="process")
             # Keep all numeric columns + period_enddate, drop structural keys
             non_feature_cols = ["silver_id"]
             df = df.drop(columns=[c for c in non_feature_cols if c in df.columns])

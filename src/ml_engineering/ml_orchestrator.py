@@ -94,7 +94,10 @@ def run_pipeline(
     # --- Step 1: Data Extraction ---
     f_log("Step 1 | Extracting data from gold feature store...", c_type="process")
     extractor = DataExtractor(db_path=DIR_DB_GOLD, table_name=gold_table)
-    raw_df = extractor.extract(target_column=ML_TARGET_COLUMN, features=features)
+
+    # Selection logic: Config-defined features > CLI-passed features > None (Discovery)
+    active_features = config.features if config.features is not None else features
+    raw_df = extractor.extract(target_column=ML_TARGET_COLUMN, features=active_features)
 
     # --- Step 2: Data Validation (pre-preparation) ---
     f_log("Step 2 | Validating extracted data...", c_type="process")

@@ -64,6 +64,7 @@ class ModelExperiment:
     name: str
     estimator: Any
     param_grid: Dict[str, List[Any]] = field(default_factory=dict)
+    features: Optional[List[str]] = None
     description: str = ""
 
 
@@ -80,16 +81,19 @@ class ModelConfiguration:
         "baseline": ModelExperiment(
             name="Baseline_Mean",
             estimator=DummyRegressor(strategy="mean"),
+            features=None,  # Uses all numeric features for context, though ignored by Dummy
             description="Naïve baseline predicting the training set mean."
         ),
         "linear": ModelExperiment(
             name="LinearRegression",
             estimator=LinearRegression(),
+            features=["unemployment_rate", "stress_rate", "employment_pct"],  # Example subset
             description="Simple regressor capturing the linear trend."
         ),
         "random_forest": ModelExperiment(
             name="RandomForest",
             estimator=RandomForestRegressor(random_state=42),
+            features=None,  # Discovery mode (all numeric features)
             param_grid={
                 "n_estimators": [100, 200],
                 "max_depth": [5, 10, None],
@@ -99,6 +103,7 @@ class ModelConfiguration:
         "gradient_boosting": ModelExperiment(
             name="GradientBoosting",
             estimator=GradientBoostingRegressor(random_state=42),
+            features=None,
             param_grid={
                 "n_estimators": [100, 200],
                 "learning_rate": [0.05, 0.1, 0.2],
@@ -108,6 +113,7 @@ class ModelConfiguration:
         "hist_gradient_boosting": ModelExperiment(
             name="HistGradientBoosting",
             estimator=HistGradientBoostingRegressor(random_state=42),
+            features=None,
             param_grid={
                 "learning_rate": [0.05, 0.1, 0.2],
                 "max_iter": [100, 300],
