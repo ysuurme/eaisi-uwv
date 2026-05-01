@@ -8,6 +8,7 @@ from config import START_MLFLOW_UI
 from src.ml_engineering.model_configs import ModelRegistry
 from src.ml_engineering.model_orchestrator import ModelOrchestrator
 from src.utils.m_mlflow_ui import ensure_mlflow_ui
+from src.ml_engineering.baseline_evaluation import log_baseline_to_mlflow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ def main():
     logger.info(f"🎯 Starting Pipeline | Table: {gold_table} | Model: {model_key} | Features: {features or 'ALL'}")
     
     try:
+        log_baseline_to_mlflow(experiment_name=f"{gold_table.replace('_gold', '')}_SickLeave")
         run_ml_pipeline(gold_table, model_key, features=features)
     except Exception:
         sys.exit(1)

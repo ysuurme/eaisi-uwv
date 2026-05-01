@@ -16,6 +16,10 @@ dependencies = [
     "statsmodels>=0.14.6",
     "mlflow>=3.10.1",
     "skops>=0.13.0",
+    "marimo>=0.20.4",
+    "statsforecast>=2.0.2",
+    "jupytext>=1.19.1",
+    "ruptures>=1.1.10",
 ]
 
 [project.scripts]
