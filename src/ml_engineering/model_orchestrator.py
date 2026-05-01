@@ -105,9 +105,9 @@ if __name__ == "__main__":
     from src.utils.m_log import setup_logging
     setup_logging()
     
-    orch = ModelOrchestrator("80072ned_SickLeave", "RF_SickLeave")
+    orch = ModelOrchestrator("80072ned_SickLeave", "LR_SickLeave")
     orch.run_experiment(
         gold_table="master_data_ml_preprocessed",
-        experiment_config=ConfigRegistry.get("random_forest"),
+        experiment_config=ConfigRegistry.get("linear"),
         threshold_r2=0.0
     )

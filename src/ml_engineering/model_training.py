@@ -15,9 +15,8 @@ import mlflow
 import mlflow.sklearn
 from mlflow.models import infer_signature
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sqlalchemy import create_engine, text, String, DateTime
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
-from sqlalchemy.sql import func
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from src.ml_engineering.model_configs import ModelExperiment
 
@@ -39,18 +38,7 @@ def configure_mlflow(db_eval_path: Path, project_root: Path) -> str:
     return db_uri
 
 
-# --- ORM Model Definitions ---
-class Base(DeclarativeBase):
-    pass
-
-class ModelTuningRecord(Base):
-    """ORM representation of hyperparameter tuning results."""
-    __tablename__ = "model_tuning_results"
-    
-    run_id: Mapped[str] = mapped_column(String, primary_key=True)
-    experiment_name: Mapped[str] = mapped_column(String)
-    cv_results_json: Mapped[str] = mapped_column(String)
-    timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
+from src.ml_engineering.model_configs import Base, ModelTuningRecord
 
 class DatasetLoader:
     """Loads and splits Gold SQLite data with lineage tracking and float enforcement."""
@@ -107,16 +95,7 @@ class ModelTrainer:
         self._init_db()
 
     def _init_db(self):
-        with self.engine_eval.connect() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS model_tuning_results (
-                    run_id TEXT PRIMARY KEY,
-                    experiment_name TEXT,
-                    cv_results_json TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            conn.commit()
+        Base.metadata.create_all(self.engine_eval)
 
     def _log_tuning_to_db(self, session: Session, run_id: str, cv_results: dict):
         """Serialises and stores the full tuning grid in eval_data.db via ORM."""

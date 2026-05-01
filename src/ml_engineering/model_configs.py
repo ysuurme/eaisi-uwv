@@ -13,6 +13,22 @@ from sklearn.ensemble import (
     RandomForestRegressor,
 )
 from sklearn.linear_model import LinearRegression
+from sqlalchemy import String, DateTime
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.sql import func
+
+class Base(DeclarativeBase):
+    """Base class for all ML evaluation ORM models."""
+    pass
+
+class ModelTuningRecord(Base):
+    """ORM representation of hyperparameter tuning results."""
+    __tablename__ = "model_tuning_results"
+    
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    experiment_name: Mapped[str] = mapped_column(String)
+    cv_results_json: Mapped[str] = mapped_column(String)
+    timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
 @dataclass(frozen=True)
 class ModelExperiment:

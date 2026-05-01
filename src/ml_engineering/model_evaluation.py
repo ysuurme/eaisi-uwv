@@ -8,9 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import mlflow
-from sklearn.metrics import r2_score, mean_absolute_error, root_mean_squared_error
 from sqlalchemy import create_engine, text, String, Float, LargeBinary, DateTime
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
+from sqlalchemy.orm import Session, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 
 # --- Configuration ---
@@ -24,10 +23,8 @@ from src.utils.m_log import f_log
 
 # MLflow tracking configuration is injected dynamically to avoid side effects.
 
-
-# --- ORM Model Definitions ---
 class Base(DeclarativeBase):
-    """Base class for all ORM models."""
+    """Base class for all ML evaluation ORM models."""
     pass
 
 class ModelEvaluationRecord(Base):
@@ -94,16 +91,23 @@ class ModelEvaluator:
         The session is NOT closed here to allow lazy loading by the caller.
         """
         with mlflow.start_run(run_id=run_id):
-            y_pred = best_model.predict(x_test)
-            r2 = r2_score(y_test, y_pred)
-            mae = mean_absolute_error(y_test, y_pred)
-            rmse = root_mean_squared_error(y_test, y_pred)
+            eval_data = x_test.copy()
+            target_col = y_test.name if y_test.name else "target"
+            eval_data[target_col] = y_test.values
 
-            mlflow.log_metrics({
-                "r2_score": r2,
-                "mean_absolute_error": mae,
-                "root_mean_squared_error": rmse
-            })
+            # Standardized Evaluation as per architectural rules
+            result = mlflow.models.evaluate(
+                model=f"runs:/{run_id}/model",
+                data=eval_data,
+                targets=target_col,
+                model_type="regressor",
+                evaluators=["default"]
+            )
+
+            # Extract metrics for the quality gate and DB persistence
+            r2 = result.metrics.get("r2_score", 0.0)
+            mae = result.metrics.get("mean_absolute_error", 0.0)
+            rmse = result.metrics.get("root_mean_squared_error", 0.0)
 
             passed_gate = r2 >= threshold_r2
             model_blob = sio.dumps(best_model)
