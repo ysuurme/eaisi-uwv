@@ -78,7 +78,15 @@ eaisi-uwv/
 │   └── ml_experimentation/     # ML experimentation and baseline models
 ├── src/                        # Production-ready source code
 │   ├── data_engineering/       # Data Medallion Pipeline (Raw, Bronze, Silver, Gold)
-│   ├── ml_engineering/         # ML Lifecycle (Training, Evaluation, Registry, Orchestrator)
+│   ├── ml_engineering/         # ML Lifecycle (Modular 6-Step Pipeline)
+│   │   ├── ml_orchestrator.py  # Pipeline Hub (Step 0)
+│   │   ├── ml_1_data_extraction.py
+│   │   ├── ml_2_data_validation.py
+│   │   ├── ml_3_data_preparation.py
+│   │   ├── ml_4_model_training.py
+│   │   ├── ml_5_model_evaluation.py
+│   │   ├── ml_6_model_validation.py
+│   │   └── model_configs.py    # Estimator Catalog & ORM Definitions
 │   ├── utils/                  # Shared utilities and database handlers
 │   └── config.py               # Project-wide configuration
 ├── main.py                     # Entry point for product orchestration
@@ -200,24 +208,32 @@ We mathematically enforce a strict Zero-Null policy using a Grouped Time-Series 
 - **Feature Variables**: Binary One-Hot Encoded flags are filled with `0` (absent). Continuous metrics fallback to column Medians. Missing-indicator flags (`_is_missing`) are automatically generated to allow models to learn from the absence of data itself.
 
 ## Machine Learning Engineering
-This documentation outlines the architectural strategy for our machine learning operations. We leverage **MLFlow** for experiment tracking, metric logging, and managing the model registry to ensure a robust MLOps lifecycle.
+This project follows a modular **MLOps Level 0** architecture, structured into sequential steps for maximum clarity and explainability.
 
-**Experimentation**
-- Technology: Jupyter (.ipynb) notebooks integrated with Git and MLFlow.
-- Strategy: Collaborative exploratory data analysis and prototyping with tracked experiments for reproducibility of data, hyperparameters, and metrics.
+**0. Orchestration (`ml_orchestrator.py`)**
+- Central hub that coordinates the execution of all steps.
+- Manages the database session and transaction boundaries (Unit of Work).
 
-**Model Training**
-- Technology: Scikit-learn and PyTorch frameworks with optional support for XGBoost, LightGBM, Keras and TensorFlow.
-- Strategy: Scalable model development enabling efficient hyperparameter tuning, target optimization, and automated feature engineering.
+**1. Data Extraction (`ml_1_data_extraction.py`)**
+- Fetches the relevant features and target from the **Gold Feature Store** (`gold_data.db`).
+- Supports explicit feature selection or automatic numeric discovery.
 
-**Model Evaluation**
-- Technology: MLFlow for tracking and visualization, combined with evaluation datasets.
-- Strategy: Interactive and automated assessment of model effectiveness, including performance comparison, bias detection, and explainability analysis.
+**2. Data Validation (`ml_2_data_validation.py`)**
+- Enforces strict quality gates on the extracted data.
+- Validates schema, completeness (zero-nulls), and data types (float64 enforcement).
 
-**Model Registry**
-- Technology: Centralized MLFlow Model Registry through mlflow.log_artifact("model.pkl")
-- Strategy: Govern the full model lifecycle including versioning, metadata storage, documentation, and release management.
+**3. Data Preparation (`ml_3_data_preparation.py`)**
+- Handles time-series aware train/test splitting.
+- Ensures features are isolated from the target and properly cast for ML models.
 
-**ML Pipelines**
-- Technology: Python-based orchestration and pipeline objects.
-- Strategy: Automate complex training and prediction workflows, triggering pipelines on-demand or on-schedule while capturing execution metadata.
+**4. Model Training (`ml_4_model_training.py`)**
+- Fits estimators (Scikit-learn) with optional hyperparameter tuning via `GridSearchCV`.
+- Automatically logs parameters and tuning grids to **MLflow**.
+
+**5. Model Evaluation (`ml_5_model_evaluation.py`)**
+- Computes standardized regression benchmarks (R², MAE, RMSE) using `mlflow.models.evaluate`.
+- Persists detailed evaluation records and model artifacts (skops blobs) to the evaluation DB.
+
+**6. Model Validation & Registry (`ml_6_model_validation.py`)**
+- Acts as the final quality gate check against performance thresholds.
+- Manages the **MLflow Model Registry**: handles versioning, tagging, and promotion to aliases like `@prod`.

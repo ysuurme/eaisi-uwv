@@ -136,12 +136,12 @@ class DatabaseGold:
         f_log(f"Completed master dataset join. Shape: {master_df.shape}", c_type="complete")
 
         # 5. Preprocessing Gate: validate → impute → validate → persist
-        from src.ml_engineering.model_preprocess import validate_master_dataset
+        from src.ml_engineering.ml_2_data_validation import DataValidator
         from src.utils.m_imputation import impute_missing_values
 
-        validate_master_dataset(master_df, stage="raw")
+        DataValidator.validate(master_df, target_column=ML_TARGET_COLUMN, stage="pre_prep")
         preprocessed_df = impute_missing_values(master_df)
-        validate_master_dataset(preprocessed_df, stage="clean")
+        DataValidator.validate(preprocessed_df, target_column=ML_TARGET_COLUMN, stage="post_prep")
 
         try:
             preprocessed_df.to_sql("master_data_ml_preprocessed", self.engine, if_exists="replace", index=False)

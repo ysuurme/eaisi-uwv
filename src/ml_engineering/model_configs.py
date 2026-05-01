@@ -1,7 +1,10 @@
 """
-Centralized registry for ML model configurations.
-Provides a scalable way to define and retrieve estimators and 
-their associated hyperparameter search spaces.
+Centralized ML Configuration Module.
+
+Single source of truth for:
+- ORM Base class (unified metadata registry for all ML tables)
+- ORM table definitions (tuning results, evaluation records)
+- Estimator configurations (ModelConfiguration catalog)
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -13,22 +16,47 @@ from sklearn.ensemble import (
     RandomForestRegressor,
 )
 from sklearn.linear_model import LinearRegression
-from sqlalchemy import String, DateTime
+from sqlalchemy import String, Float, LargeBinary, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
+
+
+# ---------------------------------------------------------------------------
+# ORM Base — single metadata registry for all ML evaluation tables
+# ---------------------------------------------------------------------------
 
 class Base(DeclarativeBase):
     """Base class for all ML evaluation ORM models."""
     pass
 
+
 class ModelTuningRecord(Base):
-    """ORM representation of hyperparameter tuning results."""
+    """Stores full GridSearchCV results as serialized JSON per run."""
     __tablename__ = "model_tuning_results"
-    
+
     run_id: Mapped[str] = mapped_column(String, primary_key=True)
     experiment_name: Mapped[str] = mapped_column(String)
     cv_results_json: Mapped[str] = mapped_column(String)
     timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
+
+
+class ModelEvaluationRecord(Base):
+    """Stores test-set metrics and serialized model blob per run."""
+    __tablename__ = "model_evaluations"
+
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String)
+    r2: Mapped[Optional[float]] = mapped_column(Float)
+    mae: Mapped[Optional[float]] = mapped_column(Float)
+    rmse: Mapped[Optional[float]] = mapped_column(Float)
+    passed_gate: Mapped[Optional[int]] = mapped_column(Float)
+    model_blob: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
+    timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Estimator Configuration Dataclass + Catalog
+# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ModelExperiment:
@@ -38,10 +66,17 @@ class ModelExperiment:
     param_grid: Dict[str, List[Any]] = field(default_factory=dict)
     description: str = ""
 
-class ModelRegistry:
-    """Factory and registry for ModelExperiment configurations."""
-    
-    _REGISTRY: Dict[str, ModelExperiment] = {
+
+class ModelConfiguration:
+    """Catalog of available estimator configurations.
+
+    Usage:
+        config = ModelConfiguration.get("linear")
+        config.estimator  # LinearRegression()
+        config.param_grid  # {}
+    """
+
+    _CATALOG: Dict[str, ModelExperiment] = {
         "baseline": ModelExperiment(
             name="Baseline_Mean",
             estimator=DummyRegressor(strategy="mean"),
@@ -84,18 +119,18 @@ class ModelRegistry:
 
     @classmethod
     def get(cls, key: str) -> ModelExperiment:
-        """Retrieves an experiment by its registry key."""
-        if key not in cls._REGISTRY:
-            available = ", ".join(cls._REGISTRY.keys())
+        """Retrieves an experiment by its catalog key."""
+        if key not in cls._CATALOG:
+            available = ", ".join(cls._CATALOG.keys())
             raise ValueError(f"Experiment '{key}' not found. Available: {available}")
-        return cls._REGISTRY[key]
+        return cls._CATALOG[key]
 
     @classmethod
     def get_all(cls) -> List[ModelExperiment]:
         """Returns all registered experiments."""
-        return list(cls._REGISTRY.values())
+        return list(cls._CATALOG.values())
 
     @classmethod
     def get_tuning_suite(cls) -> List[ModelExperiment]:
         """Returns only models that have a non-empty param_grid."""
-        return [exp for exp in cls._REGISTRY.values() if exp.param_grid]
+        return [exp for exp in cls._CATALOG.values() if exp.param_grid]
