@@ -34,3 +34,17 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "."
+extraPaths = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

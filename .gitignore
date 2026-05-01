@@ -23,7 +23,10 @@ wheels/
 # Workspace
 .env
 .github
+.claude
+.vscode
 eaisi-uwv.code-workspace
+pyrightconfig.json
 GEMINI.md
 TODO.md
 Taskfile.yml

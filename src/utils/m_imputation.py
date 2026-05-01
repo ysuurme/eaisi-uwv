@@ -61,7 +61,7 @@ def impute_missing_values(
     df: pd.DataFrame,
     *,
     numeric_strategy: str = "median",
-    add_missing_indicator: bool = True,
+    add_missing_indicator: bool = False,
 ) -> pd.DataFrame:
     """
     Return a fully imputed copy of *df* with all columns cast to float64.
@@ -70,6 +70,10 @@ def impute_missing_values(
     - Binary OHE flags ({0, 1, NaN}) → filled with 0 (absent = not observed)
     - Remaining numeric columns → SimpleImputer(strategy=numeric_strategy)
     - Non-numeric columns → dropped (should not exist in a Gold table)
+
+    add_missing_indicator: Default False. Missingness in CBS data is structural
+    (MCAR — caused by join gaps, not by the phenomenon being measured), so indicator
+    flags add noise rather than signal. Set True only if missingness is informative.
     """
     result = df.copy()
     DATE_COL = "period_enddate"
