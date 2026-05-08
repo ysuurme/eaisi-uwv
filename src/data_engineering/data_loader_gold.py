@@ -9,7 +9,7 @@ import pandas as pd
 from sqlalchemy import MetaData, create_engine, text
 
 # --- Configuration ---
-from src.config import DIR_DB_SILVER, DIR_DB_GOLD, ML_TARGET_COLUMN
+from src.config import DIR_DB_SILVER, DIR_DB_GOLD, ML_TARGET_COLUMN, CBS_TABLES_T65
 
 # --- Logging ---
 from src.utils.m_log import f_log
@@ -109,7 +109,11 @@ class DatabaseGold:
                 return master_df
 
             excluded = {target_table_name}
-            feature_table_names = [t for t in tables['name'].tolist() if t.endswith("_gold") and t not in excluded]
+            active_gold_tables = {f"{tid}_gold" for tid in CBS_TABLES_T65}
+            feature_table_names = [
+                t for t in tables['name'].tolist()
+                if t.endswith("_gold") and t not in excluded and t in active_gold_tables
+            ]
 
             feature_dfs = {}
             for table in feature_table_names:
@@ -394,20 +398,12 @@ TRANSFORMATION_REGISTRY = {
 
 if __name__ == "__main__":
     db = DatabaseGold(DIR_DB_SILVER, DIR_DB_GOLD)
-    
-    # Retrieve all tables dynamically from the Silver Database directly
-    import sqlite3
-    with sqlite3.connect(DIR_DB_SILVER) as conn:
-        tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
-    
-    # Parse identifiers ('85916NED_silver' -> '85916NED')
-    tables_to_process = [t.replace("_silver", "") for t in tables['name'].tolist() if t.endswith("_silver")]
-    
-    for table_id in tables_to_process:
+
+    for table_id in CBS_TABLES_T65:
         if table_id in TRANSFORMATION_REGISTRY:
             db.process_silver_table(table_id, TRANSFORMATION_REGISTRY[table_id])
         else:
             f_log(f"Setup Warning: Transformation logic not registered for target table: {table_id}", c_type="warning")
-            
+
     # Synthesize Master Dataset
     db.create_master_training_dataset()

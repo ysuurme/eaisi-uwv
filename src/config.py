@@ -20,8 +20,8 @@ CBS_TABLES_T3 = ["80072ned", "83415NED", "83157NED"]
 # Top 65 most relevant CBS tables for sick leave prediction
 CBS_TABLES_T65 = [
     ## Direct Sick Leave & Absence Data
-    "80072ned", # Sick leave percentage by industry and size
-    "83415NED", # Sick leave by working conditions
+    "80072ned", # Quarterly - Ziekteverzuimpercentage; bedrijfstakken (SBI 2008) en bedrijfsgrootte
+    # "83415NED", # Yearly sick leave by working conditions
     # "86009NED", # Sick leave by industry and branch size
     # "86010NED", # Sick leave by occupation/profession
     # "85998NED", # Sick leave by gender and age ---------> Gender and age are sensitive topics let's skip it for the beginning
@@ -31,7 +31,7 @@ CBS_TABLES_T65 = [
     ## Workplace Surveys & Working Conditions
     # "83156NED", # Sustainable employability by industry
     # "84434NED", # Sustainable employability by occupation
-    "83157NED", # Psychosocial work load (PSA) by industry
+    # "83157NED", # Annual psychosocial work load (PSA) by industry
     # "84436NED", # Psychosocial work load (PSA) by occupation
     # "83159NED", # Physical work load by industry
     # "84435NED", # Physical work load by occupation
@@ -52,7 +52,7 @@ CBS_TABLES_T65 = [
     # "85647NED", # Health and labor barriers for the non-working population
 
     ## Labor Market & Unemployment (Economic Pressure)
-    "85916NED", # Labor participation, quarterly, gender, national accounts
+    "85916NED", # Quarterly - Arbeidsvolume; kwartalen, geslacht, nationale rekeningen
     # "80590ned", # Labor participation and unemployment per month
     # "85264NED", # General labor participation core figures
     # "85224NED", # Labor participation (seasonally adjusted)
@@ -63,10 +63,10 @@ CBS_TABLES_T65 = [
     ## Industry-Specific Trends & Workforce Characteristics
     # "83583NED", # Jobs by industry (SBI 2008) and size
     # "83582NED", # Jobs by industry and region
-    "85917NED", # Labor volume by industry and age
-    "85918NED", # Labor volume by industry and gender
-    "85919NED", # Labor volume by industry and national accounts
-    "85920NED", # Labor volume by industry (quarterly)
+    "85917NED", # Quarterly - Beloning en arbeidsvolume van werknemers; kwartalen, nationale rekeningen
+    # "85918NED", # Yearly labor volume by industry and gender
+    # "85919NED", # Yearly labor volume by industry and national accounts
+    "85920NED", # Quarterly - Arbeidsvolume; bedrijfstak, kwartalen, nationale rekeningen
     # "85921NED", # Labor volume by industry and region -----------> Not downloaded due to a 404 error.
     # "85922NED", # Labor volume by industry and size
     # "81431NED", # Employment, wages, and working hours (core figures)
@@ -109,6 +109,16 @@ CBS_TABLES_T65 = [
     # "84566NED", # Income of households; characteristics of households, region
     # "83738NED", # Income of persons; key figures by region
 ]
+
+# --- Visualization Palette ---
+C_GREY    = "#6B7280"   # Dropped features
+C_BLUE    = "#3B82F6"   # Retained features
+C_ORANGE  = "#F59E0B"   # Threshold
+C_BAND_50 = "#BFDBFE"   # darkest blue (50% interval)
+C_BAND_80 = "#DBEAFE"   # mid blue
+C_BAND_95 = "#EFF6FF"   # lightest blue
+C_GRID    = "#E5E7EB"   # gridlines
+C_TEXT    = "#111827"   # text
 
 # --- Model Storage ---
 DIR_MODELS = PROJECT_ROOT / "models"
