@@ -393,7 +393,8 @@ TRANSFORMATION_REGISTRY = {
     "85916NED": transform_generic_feature_table,
     "85918NED": transform_generic_feature_table,
     "85919NED": transform_generic_feature_table,
-    "85920NED": transform_generic_feature_table
+    "85920NED": transform_generic_feature_table,
+    "80590eng": transform_generic_feature_table
 }
 
 if __name__ == "__main__":

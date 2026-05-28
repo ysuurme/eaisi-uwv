@@ -19,6 +19,7 @@ CBS_TABLES_T3 = ["80072ned", "83415NED", "83157NED"]
 
 # Top 65 most relevant CBS tables for sick leave prediction
 CBS_TABLES_T65 = [
+    "80590eng", # Monthly labor participation and unemployment
     ## Direct Sick Leave & Absence Data
     "80072ned", # Quarterly - Ziekteverzuimpercentage; bedrijfstakken (SBI 2008) en bedrijfsgrootte
     # "83415NED", # Yearly sick leave by working conditions
