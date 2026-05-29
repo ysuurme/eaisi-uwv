@@ -25,6 +25,13 @@ Feature selection modes
 groups    — resolves named groups from FEATURE_CATALOG to concrete column names
 discovery — uses all remaining columns after structural and OHE columns are
             removed
+
+Full-panel loading
+------------------
+``load_full_panel()`` loads the complete gold table without SBI filtering,
+keeping all sectors and all OHE columns.  It reconstructs a categorical
+``sector`` column from the OHE encoding.  This is used by the feature
+selection module, which needs cross-sector analysis.
 """
 from pathlib import Path
 from typing import List, Optional
@@ -39,6 +46,9 @@ _DATE_COL = "period_enddate"
 
 # OHE column for the CBS national total (T001081) — mirrors notebook's sbi_code == "T001081"
 _NATIONAL_TOTAL_COL = "BedrijfskenmerkenSBI2008_T001081"
+
+# OHE column prefix for all SBI sector indicators
+_OHE_PREFIX = "BedrijfskenmerkenSBI2008_"
 
 # Columns kept as structural context (date + temporal indices)
 # Note: BedrijfstakkenBranchesSBI2008 does NOT exist in the gold feature store;
@@ -110,6 +120,62 @@ class DataExtractor:
         return df
 
     # ------------------------------------------------------------------
+    # Full-panel loader for feature selection
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def load_full_panel(
+        cls,
+        db_path: Path,
+        table_name: str = "master_data_ml_preprocessed",
+    ) -> pd.DataFrame:
+        """Load the complete gold table without SBI filtering.
+
+        Returns the full panel (all sectors × all quarters) with a
+        reconstructed categorical ``sector`` column derived from the OHE
+        columns.  The OHE columns are retained so that downstream code
+        can identify and exclude them from the feature set.
+
+        This method is used by ``feature_selection.py``, which needs
+        cross-sector analysis (per-sector correlation, Granger tests, etc.)
+        that requires the complete panel — unlike ``extract()``, which
+        filters to a single sector for the ML pipeline.
+
+        Args:
+            db_path: Path to the Gold SQLite database.
+            table_name: Name of the preprocessed table in the gold store.
+
+        Returns:
+            DataFrame with all rows, all columns, plus a synthetic
+            ``sector`` column (e.g. ``"T001081"``, ``"301000"``).
+        """
+        engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+        df = pd.read_sql_table(table_name, engine)
+        df = df.sort_values(_DATE_COL).reset_index(drop=True)
+
+        # Reconstruct sector identity from OHE columns.
+        # Each row has exactly one OHE column == 1; idxmax finds it.
+        ohe_cols = [c for c in df.columns if c.startswith(_OHE_PREFIX)]
+        if not ohe_cols:
+            raise ValueError(
+                f"No OHE columns with prefix '{_OHE_PREFIX}' found in "
+                f"table '{table_name}'.  Cannot reconstruct sector identity."
+            )
+        df["sector"] = (
+            df[ohe_cols]
+            .idxmax(axis=1)
+            .str.replace(_OHE_PREFIX, "", regex=False)
+        )
+
+        f_log(
+            f"Full panel loaded | {df.shape[0]} rows × {df.shape[1]} cols | "
+            f"{df['sector'].nunique()} sectors | "
+            f"{df[_DATE_COL].nunique()} quarters",
+            c_type="success",
+        )
+        return df
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
@@ -134,7 +200,7 @@ class DataExtractor:
         In both modes all OHE SBI columns are then dropped because they carry
         no predictive signal once the series is isolated to a single entity.
         """
-        ohe_cols = [c for c in df.columns if c.startswith("BedrijfskenmerkenSBI2008_")]
+        ohe_cols = [c for c in df.columns if c.startswith(_OHE_PREFIX)]
 
         # Determine which OHE column identifies the desired series
         effective_col = sbi_filter_col if sbi_filter_col is not None else _NATIONAL_TOTAL_COL
@@ -143,7 +209,7 @@ class DataExtractor:
         if effective_col not in df.columns:
             raise ValueError(
                 f"SBI column '{effective_col}' not found in dataset.  "
-                f"OHE columns start with 'BedrijfskenmerkenSBI2008_'."
+                f"OHE columns start with '{_OHE_PREFIX}'."
             )
 
         df = df[df[effective_col] == 1].copy()

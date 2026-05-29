@@ -9,107 +9,164 @@ DIR_DB_BRONZE = PROJECT_ROOT / "data" / "1_bronze" / "bronze_data.db"
 DIR_DB_SILVER = PROJECT_ROOT / "data" / "2_silver" / "silver_data.db"
 DIR_DB_GOLD   = PROJECT_ROOT / "data" / "3_gold"   / "gold_data.db"
 DIR_DB_EVAL   = PROJECT_ROOT / "data" / "4_eval" / "eval_data.db"
+DIR_FEATURE_SELECTION = PROJECT_ROOT / "data" / "feature_selection"
+
 
 # --- Toggle Flags ---
 START_MLFLOW_UI = True # Set to True/False to auto-start MLflow UI in background
 
-# --- CBS API Configurations ---
-# Top 3 most relevant CBS tables for sick leave prediction
-CBS_TABLES_T3 = ["80072ned", "83415NED", "83157NED"]
+# --- Temporal Filter ---
+# Structural break: the WIA law (2003) caused a significant regime shift in
+# Dutch absenteeism data.  All data before this year is excluded from the
+# gold layer to avoid training on a fundamentally different regime.
+DATA_START_YEAR = 2003
 
-# Top 65 most relevant CBS tables for sick leave prediction
-CBS_TABLES_T65 = [
-    "80590eng", # Monthly labor participation and unemployment
-    ## Direct Sick Leave & Absence Data
-    "80072ned", # Quarterly - Ziekteverzuimpercentage; bedrijfstakken (SBI 2008) en bedrijfsgrootte
-    # "83415NED", # Yearly sick leave by working conditions
-    # "86009NED", # Sick leave by industry and branch size
-    # "86010NED", # Sick leave by occupation/profession
-    # "85998NED", # Sick leave by gender and age ---------> Gender and age are sensitive topics let's skip it for the beginning
-    # "86011NED", # Sick leave by origin and education level
-    # "86168NED", # Absence duration by type of complaint/reason
+# ═══════════════════════════════════════════════════════════════════════════
+# CBS TABLE REGISTRY
+# ═══════════════════════════════════════════════════════════════════════════
+# Central definition of every CBS table in the pipeline.
+# Each entry maps a table ID to its metadata:
+#   category  — driver category from the literature review
+#   frequency — "quarterly" or "yearly"
+#   lag       — publication lag in years (yearly tables only; 1 = standard)
+#
+# The gold loader processes ALL tables in the registry.
+# Presets (below) select subsets for feature selection and model training.
+# ═══════════════════════════════════════════════════════════════════════════
 
-    ## Workplace Surveys & Working Conditions
-    # "83156NED", # Sustainable employability by industry
-    # "84434NED", # Sustainable employability by occupation
-    # "83157NED", # Annual psychosocial work load (PSA) by industry
-    # "84436NED", # Psychosocial work load (PSA) by occupation
-    # "83159NED", # Physical work load by industry
-    # "84435NED", # Physical work load by occupation
-    # "84031NED", # Occupational accidents (4+ days absence) by company characteristics
-    # "84030NED", # Occupational accidents by accident characteristics
-    # "83158NED", # Occupational accidents by industry
-    # "85718NED", # Work from home (Company Policy proxy)
-    # "85786NED", # Weekly work-from-home hours
+CBS_TABLE_REGISTRY: dict[str, dict] = {
+    # ── Target ────────────────────────────────────────────────────────────
+    "80072ned": {
+        "category": "target",
+        "frequency": "quarterly",
+        "description": "Ziekteverzuimpercentage; bedrijfstakken (SBI 2008)",
+    },
 
-    ## General Health & Lifestyle (Predictive Proxies)
-    # "86047NED", # Labor participation and health status
-    # "86067NED", # Health status of the labor force
-    # "81628ENG", # Health, lifestyle, and healthcare supply key figures
-    # "83005ENG", # Perceived state of health and medical care contacts
-    # "81174ENG", # Chronic disorders and functional limitations
-    # "81177eng", # Lifestyle and preventive screening
-    # "81175eng", # Lifestyle factors by sex and age
-    # "85647NED", # Health and labor barriers for the non-working population
+    # ── Labor Volume  ─────────────────────────────────────
+    "85920NED": {
+        "category": "labor_volume",
+        "frequency": "quarterly",
+        "description": "Arbeidsvolume; bedrijfstak, kwartalen, nationale rekeningen",
+    },
+    "85916NED": {
+        "category": "labor_volume",
+        "frequency": "quarterly",
+        "description": "Beloning en arbeidsvolume van werknemers; kwartalen, nationale rekeningen",
+    },
 
-    ## Labor Market & Unemployment (Economic Pressure)
-    "85916NED", # Quarterly - Arbeidsvolume; kwartalen, geslacht, nationale rekeningen
-    # "80590ned", # Labor participation and unemployment per month
-    # "85264NED", # General labor participation core figures
-    # "85224NED", # Labor participation (seasonally adjusted)
-    # "85312NED", # Unemployment duration (long-term unemployment trends)
-    # "83752NED", # Long-term labor participation trends (since 1969)
-    # "85271NED", # Average income and labor position
+    # ── Working Conditions (WC)  ──────────────────────────────────
+    "86009NED": {
+        "category": "working_conditions",
+        "frequency": "yearly",
+        "lag": 1,
+        "description": "Sick leave by industry and branch size (cause of absence)",
+    },
+    "85917NED": {
+         "category": "working_conditions",
+         "frequency": "quarterly",
+         "lag": 1,
+         "description": "Werkgelegenheid; geslacht, dienstverband, kenmerken baan, SBI2008",
+    },
 
-    ## Industry-Specific Trends & Workforce Characteristics
-    # "83583NED", # Jobs by industry (SBI 2008) and size
-    # "83582NED", # Jobs by industry and region
-    "85917NED", # Quarterly - Beloning en arbeidsvolume van werknemers; kwartalen, nationale rekeningen
-    # "85918NED", # Yearly labor volume by industry and gender
-    # "85919NED", # Yearly labor volume by industry and national accounts
-    "85920NED", # Quarterly - Arbeidsvolume; bedrijfstak, kwartalen, nationale rekeningen
-    # "85921NED", # Labor volume by industry and region -----------> Not downloaded due to a 404 error.
-    # "85922NED", # Labor volume by industry and size
-    # "81431NED", # Employment, wages, and working hours (core figures)
-    # "83451NED", # Monthly employment and wage trends
-    # "85274NED", # Seniority (tenure) of the working population
-    # "85275NED", # Average working hours
-    # "85276NED", # Occupational distribution
-    # "85278NED", # Position in the work sphere (Fixed vs. Flexible contracts)
+    # ── Wellbeing (WB) — yearly ───────────────────────────────────────────
+    "85542NED": {
+        "category": "wellbeing",
+        "frequency": "yearly",
+        "lag": 1,
+        "description": "Welzijn; kerncijfers, persoonskenmerken",
+    },
 
-    ## Healthcare Accessibility & Costs
-    # "81178ENG", # Medical contacts, hospitalization, and medicine use
-    # "82470NED", # Medical specialist care by diagnosis (DBCs)
-    # "85544NED", # Healthcare expenditure by financing and function
-    # "83700ENG", # Revenues of health care financing schemes
+    # ── Labor Structure (LS) — quarterly + yearly ─────────────────────────
+    "85278NED": {
+         "category": "labor_structure",
+         "frequency": "quarterly",
+         "description": "Werkzame beroepsbevolking; positie in de werkkring (fixed vs flex)",
+    },
+    "80590ned": {
+         "category": "labor_structure",
+         "frequency": "quarterly",
+         "description": "Arbeidsdeelname en werkloosheid per maand",
+    },
+    "81433ned": {
+         "category": "labor_structure",
+         "frequency": "yearly",
+         "lag": 1,
+         "description": "Werkgelegenheid; geslacht, dienstverband, kenmerken baan, SBI2008",
+    },
 
-    ## Macroeconomic Proxies (GDP & Regional Status)
-    # "84432ENG", # Regional key figures (including GDP)
-    # "71541eng", # Regional accounts (GDP per capita)
-    # "82801ENG", # Regional National Accounts key figures
-    # "86092NED", # Socio-economic status scores by neighborhood
-    # "85900NED", # Socio-economic status (2023 index)
+    # ── Socio-Economic (SE) — yearly ──────────────────────────────────────
+    # "85266NED": {
+    #     "category": "socioeconomic",
+    #     "frequency": "yearly",
+    #     "lag": 1,
+    #     "description": "Arbeidsdeelname; onderwijsniveau",
+    # },
 
-    ## Labor Market & Workforce Dynamics (SBI 2008 & Contracts)
-    # "84939NED", # Employment; jobs, wages, and hours; SBI 2008; region
-    # "81414NED", # Jobs of employees; gender, age, and SBI 2008
-    # "82325NED", # Jobs of employees; employment type, SBI 2008
-    # "82623NED", # Flexible labor; position in the labor market
-    # "81408NED", # Self-employed; characteristics and income
+    # ── Health & Lifestyle (HL) — yearly ──────────────────────────────────
+    # "81628NED": {
+    #     "category": "health",
+    #     "frequency": "yearly",
+    #     "lag": 1,
+    #     "description": "Gezondheid, leefstijl, zorggebruik; kerncijfers",
+    # },
+}
 
-    ## Demographics & Education (The 'Human' Factor)
-    # "84671NED", # Population; gender, age, and marital status, 1 January
-    # "84669NED", # Population; gender, age, and origin/background
-    # "82439NED", # Educational attainment; labor market position and gender
-    # "81567NED", # Level of education; population 15 to 75 years
+# ═══════════════════════════════════════════════════════════════════════════
+# EXPERIMENT PRESETS
+# ═══════════════════════════════════════════════════════════════════════════
+# Each preset defines which driver categories to include.
+# "basic" and "all" are always present.  Add incremental presets for the
+# thesis comparison experiment (baseline → +conditions → +wellbeing → ...).
+# ═══════════════════════════════════════════════════════════════════════════
 
-    ## Socio-Economic Status & Regional Data
-    # "83913NED", # Socio-economic category; person, gender, age, and region
-    # "83648NED", # Key figures; districts and neighborhoods (Wijken en Buurten)
-    # "83734NED", # Regional core figures; Netherlands (General overview)
-    # "84566NED", # Income of households; characteristics of households, region
-    # "83738NED", # Income of persons; key figures by region
+CBS_PRESETS: dict[str, list[str]] = {
+    "basic":              ["labor_volume"],
+    "basic_conditions":   ["labor_volume", "working_conditions"],
+    "basic_wellbeing":    ["labor_volume", "working_conditions", "wellbeing"],
+    "basic_labor_struct": ["labor_volume", "working_conditions", "wellbeing", "labor_structure"],
+    "basic_socio":        ["labor_volume", "working_conditions", "wellbeing", "labor_structure", "socioeconomic"],
+    "all":                ["labor_volume", "working_conditions", "wellbeing", "labor_structure", "socioeconomic", "health"],
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DERIVED CONSTANTS (backward-compatible with existing loaders)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# All quarterly tables to process (including target)
+CBS_TABLES_TO_LOAD = [
+    tid for tid, meta in CBS_TABLE_REGISTRY.items()
+    if meta["frequency"] == "quarterly"
 ]
+
+# All yearly feature tables with their publication lag
+CBS_TABLES_YEARLY: dict[str, int] = {
+    tid: meta.get("lag", 1)
+    for tid, meta in CBS_TABLE_REGISTRY.items()
+    if meta["frequency"] == "yearly"
+}
+
+# Target table ID
+CBS_TARGET_TABLE = next(
+    tid for tid, meta in CBS_TABLE_REGISTRY.items()
+    if meta["category"] == "target"
+)
+
+
+def get_tables_for_preset(preset_name: str) -> list[str]:
+    """Return the list of CBS table IDs (excluding target) for a preset."""
+    if preset_name not in CBS_PRESETS:
+        raise ValueError(f"Unknown preset '{preset_name}'. Available: {list(CBS_PRESETS.keys())}")
+    categories = set(CBS_PRESETS[preset_name])
+    return [
+        tid for tid, meta in CBS_TABLE_REGISTRY.items()
+        if meta["category"] in categories
+    ]
+
+
+def get_category_for_table(table_id: str) -> str | None:
+    """Return the driver category for a CBS table ID."""
+    meta = CBS_TABLE_REGISTRY.get(table_id)
+    return meta["category"] if meta else None
 
 # --- Visualization Palette ---
 C_GREY    = "#6B7280"   # Dropped features

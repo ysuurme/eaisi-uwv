@@ -5,7 +5,7 @@ from pathlib import Path
 import cbsodata
 
 # --- Configuration ---
-from src.config import DIR_DATA_RAW, CBS_TABLES_T3, CBS_TABLES_T65
+from src.config import DIR_DATA_RAW, CBS_TABLES_TO_LOAD, CBS_TABLES_YEARLY
 
 # --- Logging ---
 from src.utils.m_log import f_log
@@ -77,5 +77,5 @@ class CBSDataLoader:
 if __name__ == "__main__":
     loader = CBSDataLoader(output_dir=DIR_DATA_RAW)
     loader.get_table_list()
-    for table in CBS_TABLES_T65:
+    for table in list(CBS_TABLES_TO_LOAD) + list(CBS_TABLES_YEARLY):
         loader.get_table(table)

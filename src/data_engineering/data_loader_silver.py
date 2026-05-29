@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, select, insert
 
 # --- Configuration ---
-from src.config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_T3, CBS_TABLES_T65
+from src.config import DIR_DB_BRONZE, DIR_DB_SILVER, CBS_TABLES_TO_LOAD, CBS_TABLES_YEARLY
 
 # --- Logging ---
 from src.utils.m_log import f_log
@@ -135,5 +135,5 @@ class DatabaseSilver:
 
 if __name__ == "__main__":
     db = DatabaseSilver(DIR_DB_BRONZE, DIR_DB_SILVER)
-    for table_id in CBS_TABLES_T65:
+    for table_id in list(CBS_TABLES_TO_LOAD) + list(CBS_TABLES_YEARLY):
         db.create_silver_table(table_id)

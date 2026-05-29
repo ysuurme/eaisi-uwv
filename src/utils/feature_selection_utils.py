@@ -45,8 +45,9 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.inspection import permutation_importance as sk_permutation_importance
-from sklearn.linear_model import LassoCV
+from sklearn.linear_model import Lasso, LassoCV
 from sklearn.preprocessing import StandardScaler
+from joblib import Parallel, delayed
 from statsmodels.tsa.stattools import grangercausalitytests
 
 logger = logging.getLogger("feature_selection")
@@ -190,6 +191,34 @@ def identify_feature_columns(
         and c != target
         and not c.startswith(sbi_prefix)
     ])
+
+
+def identify_yearly_feature_columns(
+    feature_cols: list[str],
+    prefix: str = "y_",
+) -> list[str]:
+    """Identify features that originated from yearly CBS tables.
+
+    The gold layer prefixes all yearly-origin feature columns with ``y_``
+    during transformation (see ``transform_generic_feature_table`` with
+    ``lag_years > 0``).  This function simply filters on that prefix.
+
+    Parameters
+    ----------
+    feature_cols : list[str]
+        All feature column names (e.g. from ``identify_feature_columns()``).
+    prefix : str, default ``"y_"``
+        The prefix applied to yearly features by the gold layer.
+
+    Returns
+    -------
+    list[str]
+        Feature column names that start with ``prefix``.
+    """
+    yearly = [c for c in feature_cols if c.startswith(prefix)]
+    if yearly:
+        logger.info("identify_yearly: %d features with '%s' prefix", len(yearly), prefix)
+    return yearly
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -730,6 +759,7 @@ def apply_lasso_stability_filter(
     random_state: int = 42,
     horizons: list[int] | None = None,
     sector_col: str | None = None,
+    n_jobs: int = -1,
 ) -> dict[str, Any]:
     """Keep features that Lasso selects consistently across bootstrap samples.
 
@@ -768,6 +798,9 @@ def apply_lasso_stability_filter(
     sector_col : str or None, default None
         Column identifying sectors.  Required when ``horizons`` is provided
         to shift the target within each sector correctly.
+    n_jobs : int, default -1
+        Number of parallel jobs for the bootstrap loop.  -1 uses all
+        available CPU cores.  1 disables parallelism.
 
     Returns
     -------
@@ -785,7 +818,7 @@ def apply_lasso_stability_filter(
         # ── Contemporaneous mode (original behaviour) ────────────────
         selection_prob = _lasso_bootstrap_loop(
             df[feature_list].values, df[target].values,
-            n_bootstraps, random_state,
+            n_bootstraps, random_state, n_jobs=n_jobs,
         )
 
         scores = {col: float(p) for col, p in zip(feature_list, selection_prob)}
@@ -818,7 +851,7 @@ def apply_lasso_stability_filter(
         horizon_seed = random_state + h * 10_000
 
         horizon_probs[h] = _lasso_bootstrap_loop(
-            X_h, y_h, n_bootstraps, horizon_seed,
+            X_h, y_h, n_bootstraps, horizon_seed, n_jobs=n_jobs,
         )
 
     # Final probability = max across horizons (pass at ANY horizon)
@@ -853,12 +886,14 @@ def _lasso_bootstrap_loop(
     y: np.ndarray,
     n_bootstraps: int,
     random_state: int,
+    n_jobs: int = -1,
 ) -> np.ndarray:
     """Run the core Lasso bootstrap loop and return selection probabilities.
 
-    Standardises features, runs ``n_bootstraps`` LassoCV fits on resampled
-    data, and returns the fraction of bootstraps where each feature received
-    a non-zero coefficient.
+    Fits ``LassoCV`` **once** on the full data to find the optimal
+    regularisation strength (``alpha``), then runs ``n_bootstraps`` plain
+    ``Lasso`` fits (with that fixed alpha) on resampled data in parallel.
+    This is ~45× faster than running ``LassoCV`` on every bootstrap.
 
     Parameters
     ----------
@@ -870,6 +905,9 @@ def _lasso_bootstrap_loop(
         Number of bootstrap iterations.
     random_state : int
         Base random seed.
+    n_jobs : int, default -1
+        Number of parallel jobs.  -1 uses all available CPU cores.
+        1 disables parallelism (useful for debugging).
 
     Returns
     -------
@@ -882,22 +920,43 @@ def _lasso_bootstrap_loop(
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
 
-    n_features = X.shape[1]
-    selection_counts = np.zeros(n_features)
+    # Step 1: find optimal alpha from full data (one LassoCV, ~500 internal fits)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        lasso_cv = LassoCV(cv=5, random_state=random_state, max_iter=10_000, tol=1e-2)
+        lasso_cv.fit(X, y)
+    alpha = lasso_cv.alpha_
 
-    for i in range(n_bootstraps):
-        if (i + 1) % 10 == 0 or i == 0:
-            logger.debug("lasso_stability        bootstrap %d/%d", i + 1, n_bootstraps)
-        rng = np.random.RandomState(random_state + i)
-        idx = rng.choice(len(X), size=len(X), replace=True)
+    # Step 2: run bootstraps with fixed alpha (plain Lasso, 1 fit each)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_single_lasso_bootstrap)(X, y, alpha, random_state, i)
+        for i in range(n_bootstraps)
+    )
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            lasso = LassoCV(cv=5, random_state=random_state, max_iter=10_000, tol=1e-2)
-            lasso.fit(X[idx], y[idx])
-        selection_counts += np.abs(lasso.coef_) > 1e-10
-
+    selection_counts = np.sum(results, axis=0)
     return selection_counts / n_bootstraps
+
+
+def _single_lasso_bootstrap(
+    X: np.ndarray,
+    y: np.ndarray,
+    alpha: float,
+    random_state: int,
+    boot_idx: int,
+) -> np.ndarray:
+    """Fit one Lasso bootstrap with pre-computed alpha and return selection mask.
+
+    This function is called in parallel by ``_lasso_bootstrap_loop``.
+    """
+    rng = np.random.RandomState(random_state + boot_idx)
+    idx = rng.choice(len(X), size=len(X), replace=True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        lasso = Lasso(alpha=alpha, max_iter=10_000, tol=1e-2)
+        lasso.fit(X[idx], y[idx])
+
+    return (np.abs(lasso.coef_) > 1e-10).astype(np.float64)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1126,3 +1185,216 @@ def save_preset_to_json(
     print(f"✅ Preset saved: {path}  ({len(survivors)} features, "
           f"{len(feature_groups)} groups)")
     return path
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# YEARLY FEATURE INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+def merge_yearly_features(
+    df_quarterly: pd.DataFrame,
+    df_yearly: pd.DataFrame,
+    yearly_feature_cols: list[str],
+    year_col: str = "year",
+    lag_years: int = 1,
+    sector_col: str | None = None,
+    yearly_sector_col: str | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Merge yearly CBS data into a quarterly panel with configurable lag.
+
+    Each yearly value is broadcast to all 4 quarters of the **lagged** year.
+    With ``lag_years=1`` (default), the 2022 yearly value appears in Q1–Q4
+    of 2023 — avoiding look-ahead bias because annual data is typically
+    published the following year.
+
+    Parameters
+    ----------
+    df_quarterly : pd.DataFrame
+        The quarterly panel dataset (must contain ``year_col``).
+    df_yearly : pd.DataFrame
+        The yearly CBS dataset.
+    yearly_feature_cols : list[str]
+        Column names in ``df_yearly`` to merge.
+    year_col : str, default ``"year"``
+        Year column present in both datasets.
+    lag_years : int, default 1
+        How many years to lag.  1 means "use last year's value for this
+        year's quarters."  0 means no lag (mild look-ahead bias).
+    sector_col : str or None
+        Sector column in ``df_quarterly`` (e.g. ``"sector"``).
+    yearly_sector_col : str or None
+        Sector column in ``df_yearly``.  If ``None`` but ``sector_col``
+        is provided, the yearly data is treated as national-level and
+        broadcast to all sectors.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, list[str]]
+        ``(merged_df, new_column_names)`` — the quarterly DataFrame with
+        yearly features added, and the list of new column names (suffixed
+        with ``_y`` if a name collision would occur).
+    """
+    df_y = df_yearly.copy()
+
+    # Apply lag: shift the year so yearly 2022 maps to quarterly 2023
+    df_y[year_col] = df_y[year_col] + lag_years
+
+    # Determine merge keys
+    merge_keys = [year_col]
+    if sector_col and yearly_sector_col:
+        df_y = df_y.rename(columns={yearly_sector_col: sector_col})
+        merge_keys.append(sector_col)
+
+    # Resolve column name collisions
+    existing_cols = set(df_quarterly.columns)
+    rename_map: dict[str, str] = {}
+    final_names: list[str] = []
+    for col in yearly_feature_cols:
+        new_name = col
+        if col in existing_cols:
+            new_name = f"{col}_yearly"
+            rename_map[col] = new_name
+        final_names.append(new_name)
+
+    if rename_map:
+        df_y = df_y.rename(columns=rename_map)
+
+    # Select only the columns we need for merging
+    merge_cols = merge_keys + final_names
+    df_y_slim = df_y[merge_cols].drop_duplicates()
+
+    # Merge
+    merged = df_quarterly.merge(df_y_slim, on=merge_keys, how="left")
+
+    n_matched = merged[final_names[0]].notna().sum() if final_names else 0
+    n_total = len(merged)
+    print(f"Yearly merge: {len(final_names)} features, "
+          f"lag={lag_years} year(s), "
+          f"{n_matched}/{n_total} rows matched "
+          f"({n_matched / n_total:.0%})")
+
+    return merged, final_names
+
+
+def evaluate_yearly_features(
+    yearly_feature_cols: list[str],
+    df: pd.DataFrame,
+    target: str,
+    year_col: str = "year",
+    sector_col: str | None = None,
+    corr_threshold: float = 0.10,
+    lag_threshold: float = 0.10,
+) -> dict[str, Any]:
+    """Evaluate yearly features at annual granularity.
+
+    Quarterly filters penalise yearly features because within-sector
+    differencing produces 75% zeros (the value only changes at Q1
+    boundaries).  This function evaluates yearly features fairly by
+    aggregating the quarterly target to annual means first.
+
+    Two tests are performed at annual resolution:
+
+    1. **Year-over-year differenced correlation** —
+       ``corr(Δfeature_year, Δtarget_year)`` within each sector,
+       aggregated across sectors using the median.
+    2. **One-year-ahead lagged correlation** —
+       ``corr(feature_year, target_{year+1})`` within each sector,
+       testing whether this year's feature predicts next year's
+       absenteeism.
+
+    A feature passes if **either** test exceeds its threshold.
+
+    Parameters
+    ----------
+    yearly_feature_cols : list[str]
+        Column names to evaluate.
+    df : pd.DataFrame
+        The quarterly panel with yearly features already merged in.
+    target : str
+        Target column name.
+    year_col : str, default ``"year"``
+        Year column for annual aggregation.
+    sector_col : str or None
+        Sector column for panel-aware computation.
+    corr_threshold : float, default 0.10
+        Minimum median |r| for the differenced correlation test.
+    lag_threshold : float, default 0.10
+        Minimum median |r| for the one-year-ahead lagged test.
+
+    Returns
+    -------
+    dict
+        Result dict (same format as other filters).
+        ``scores[feature]`` = dict with ``"diff_corr"`` and ``"lag_corr"``
+        keys, each containing the median |r| across sectors.
+    """
+    cols_needed = [year_col, target] + yearly_feature_cols
+    if sector_col:
+        cols_needed.append(sector_col)
+
+    # Aggregate quarterly target to annual means
+    group_keys = [year_col] if not sector_col else [sector_col, year_col]
+    df_annual = (
+        df[cols_needed]
+        .dropna(subset=yearly_feature_cols + [target], how="all")
+        .groupby(group_keys)
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+
+    if sector_col:
+        sector_groups = [
+            (s, g.sort_values(year_col))
+            for s, g in df_annual.groupby(sector_col)
+        ]
+    else:
+        sector_groups = [("__all__", df_annual.sort_values(year_col))]
+
+    scores: dict[str, dict[str, float]] = {}
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for feat in yearly_feature_cols:
+            # Test 1: year-over-year differenced correlation
+            diff_corrs: list[float] = []
+            for _, group in sector_groups:
+                diffed = group[[feat, target]].diff().iloc[1:]
+                valid = diffed[feat].notna() & diffed[target].notna()
+                if valid.sum() > 3:
+                    r = diffed.loc[valid, feat].corr(diffed.loc[valid, target])
+                    if not np.isnan(r):
+                        diff_corrs.append(abs(r))
+
+            # Test 2: one-year-ahead lagged correlation
+            lag_corrs: list[float] = []
+            for _, group in sector_groups:
+                future_target = group[target].shift(-1)
+                valid = group[feat].notna() & future_target.notna()
+                if valid.sum() > 3:
+                    r = group.loc[valid, feat].corr(future_target[valid])
+                    if not np.isnan(r):
+                        lag_corrs.append(abs(r))
+
+            diff_score = float(np.median(diff_corrs)) if diff_corrs else 0.0
+            lag_score = float(np.median(lag_corrs)) if lag_corrs else 0.0
+            scores[feat] = {"diff_corr": diff_score, "lag_corr": lag_score}
+
+    retained, dropped = [], []
+    for feat in yearly_feature_cols:
+        passes_diff = scores[feat]["diff_corr"] >= corr_threshold
+        passes_lag = scores[feat]["lag_corr"] >= lag_threshold
+        if passes_diff or passes_lag:
+            retained.append(feat)
+        else:
+            dropped.append(feat)
+
+    logger.info(
+        "yearly_evaluation      retained=%d  dropped=%d  "
+        "(corr_threshold=%.2f, lag_threshold=%.2f)",
+        len(retained), len(dropped), corr_threshold, lag_threshold,
+    )
+    return _make_result(
+        "yearly_evaluation",
+        {"corr_threshold": corr_threshold, "lag_threshold": lag_threshold,
+         "year_col": year_col, "sector_col": sector_col},
+        yearly_feature_cols, retained, dropped, scores,
+    )
