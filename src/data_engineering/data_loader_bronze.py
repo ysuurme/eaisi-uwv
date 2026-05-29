@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, insert, MetaData, Table, Column, String, Integer, Float
 
 # --- Configuration ---
-from src.config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_T65
+from src.config import DIR_DATA_RAW, DIR_DB_BRONZE, CBS_TABLES_TO_LOAD, CBS_TABLES_YEARLY
 
 # --- Logging ---
 from src.utils.m_log import f_log
@@ -111,5 +111,5 @@ class DatabaseBronze:
 
 if __name__ == "__main__":
     db = DatabaseBronze(DIR_DATA_RAW, DIR_DB_BRONZE)
-    for table_id in CBS_TABLES_T65:
+    for table_id in list(CBS_TABLES_TO_LOAD) + list(CBS_TABLES_YEARLY):
         db.ingest_0_raw_folder(table_id)

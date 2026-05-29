@@ -9,7 +9,7 @@ import pandas as pd
 from sqlalchemy import MetaData, create_engine, text
 
 # --- Configuration ---
-from src.config import DIR_DB_SILVER, DIR_DB_GOLD, ML_TARGET_COLUMN, CBS_TABLES_T65
+from src.config import DIR_DB_SILVER, DIR_DB_GOLD, DIR_FEATURE_SELECTION, ML_TARGET_COLUMN, CBS_TABLES_TO_LOAD, CBS_TABLES_YEARLY, DATA_START_YEAR
 
 # --- Logging ---
 from src.utils.m_log import f_log
@@ -109,7 +109,10 @@ class DatabaseGold:
                 return master_df
 
             excluded = {target_table_name}
-            active_gold_tables = {f"{tid}_gold" for tid in CBS_TABLES_T65}
+            active_gold_tables = (
+                {f"{tid}_gold" for tid in CBS_TABLES_TO_LOAD}
+                | {f"{tid}_gold" for tid in CBS_TABLES_YEARLY}
+            )
             feature_table_names = [
                 t for t in tables['name'].tolist()
                 if t.endswith("_gold") and t not in excluded and t in active_gold_tables
@@ -123,12 +126,20 @@ class DatabaseGold:
                     f_log(f"Error loading feature table {table}: {e}", c_type="error")
 
         # 3. Tiered Feature Merge using Pure Function
-        master_df, sbi_joined, broadcast_joined = synthesize_master_features(master_df, feature_dfs, ML_TARGET_COLUMN)
+        master_df, sbi_joined, broadcast_joined, column_origin = synthesize_master_features(master_df, feature_dfs, ML_TARGET_COLUMN)
 
         # Join Summary Report
         f_log("--- Master Join Summary ---", c_type="info")
         f_log(f"Tier 1 (SBI-specific, {len(sbi_joined)} tables): {sbi_joined or 'None'}", c_type="info")
         f_log(f"Tier 2 (Broadcast/no SBI, {len(broadcast_joined)} tables — ADD SBI DIMENSION): {broadcast_joined or 'None'}", c_type="warning")
+
+        # Save column-origin mapping (enables preset-aware feature filtering)
+        import json
+        origin_path = Path(DIR_FEATURE_SELECTION) / "column_origin.json"
+        origin_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(origin_path, "w") as f:
+            json.dump(column_origin, f, indent=2, sort_keys=True)
+        f_log(f"Column-origin mapping: {len(column_origin)} features → {origin_path}", c_type="store")
 
         # 4. Storage Persistence (joined, pre-imputation)
         try:
@@ -172,7 +183,7 @@ def synthesize_master_features(
         target_col: The target column name for baseline application.
 
     Returns:
-        Tuple of (master_df, sbi_joined_list, broadcast_joined_list)
+        Tuple of (master_df, sbi_joined_list, broadcast_joined_list, column_origin_dict)
     """
     master_df = master_df.copy()
     SBI_COL = "BedrijfstakkenBranchesSBI2008"
@@ -204,12 +215,18 @@ def synthesize_master_features(
 
     sbi_joined: list[str] = []
     broadcast_joined: list[str] = []
+    column_origin: dict[str, str] = {}  # {column_name: table_id}
 
     for table, feature_df in feature_dfs.items():
         feature_df = feature_df.copy()
+        cols_before = set(master_df.columns)
 
         if DATE_COL not in feature_df.columns:
             continue
+
+        # Ensure datetime type (string after SQLite round-trip)
+        if not pd.api.types.is_datetime64_any_dtype(feature_df[DATE_COL]):
+            feature_df[DATE_COL] = pd.to_datetime(feature_df[DATE_COL], errors='coerce')
 
         has_sbi = SBI_COL in feature_df.columns and SBI_COL in master_df.columns
         active_keys = [DATE_COL, SBI_COL] if has_sbi else [DATE_COL]
@@ -225,6 +242,11 @@ def synthesize_master_features(
 
         master_df = pd.merge(master_df, feature_df, on=active_keys, how="left")
 
+        # Track which new columns came from this table
+        table_id = table.replace("_gold", "")
+        for col in set(master_df.columns) - cols_before:
+            column_origin[col] = table_id
+
         if has_sbi:
             sbi_joined.append(table)
         else:
@@ -233,13 +255,20 @@ def synthesize_master_features(
     if "silver_id" in master_df.columns:
         master_df = master_df.drop(columns=["silver_id"])
 
-    return master_df, sbi_joined, broadcast_joined
+    return master_df, sbi_joined, broadcast_joined, column_origin
 
 
-def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataFrame:
+def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None, lag_years: int = 0) -> pd.DataFrame:
     """
     Applies the foundational structural baseline logic for Gold datasets.
     Handles temporal filtering, yearly extrapolation, explicit pruning and zero-filling.
+
+    Parameters
+    ----------
+    lag_years : int, default 0
+        For purely yearly tables, shift the year forward by this many years
+        when expanding to quarterly.  Use 1 to avoid look-ahead bias
+        (2022 annual value → Q1-Q4 2023).
     """
     df = df.copy()
 
@@ -247,11 +276,18 @@ def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataF
     if 'Perioden' in df.columns:
         if not df['Perioden'].str.contains('KW', na=False).any() and df['Perioden'].str.contains('JJ', na=False).any():
             # Extrapolation Logic: Convert purely yearly tables to quarterly
-            f_log("WARNING: Extrapolating yearly data to quarters. Values repeated 4x! Replace with proper imputation strategy/percentages if needed.", c_type="warning")
+            lag_label = f", lag={lag_years}y" if lag_years else ""
+            f_log(f"Expanding yearly data to quarters (values repeated 4x{lag_label}).", c_type="warning")
             df_list = []
             for quarter in ['KW01', 'KW02', 'KW03', 'KW04']:
                 temp = df[df['Perioden'].str.contains('JJ', na=False)].copy()
-                temp['Perioden'] = temp['Perioden'].str.replace(r'JJ.*', quarter, regex=True)
+                if lag_years:
+                    # Shift year forward: 2022JJ00 with lag=1 → 2023KWxx
+                    temp['Perioden'] = temp['Perioden'].apply(
+                        lambda p: str(int(p[:4]) + lag_years) + quarter
+                    )
+                else:
+                    temp['Perioden'] = temp['Perioden'].str.replace(r'JJ.*', quarter, regex=True)
                 df_list.append(temp)
             df = pd.concat(df_list, ignore_index=True)
         else:
@@ -296,17 +332,56 @@ def apply_gold_baseline(df: pd.DataFrame, ml_target_col: str = None) -> pd.DataF
 
     # 5. Drop NaNs on specific crucial identifier 
     if 'period_enddate' in df.columns:
+        # Ensure datetime type (may be string after SQLite round-trip)
+        if not pd.api.types.is_datetime64_any_dtype(df['period_enddate']):
+            df['period_enddate'] = pd.to_datetime(df['period_enddate'], errors='coerce')
         df = df.dropna(subset=['period_enddate'])
+
+        # 6. Structural break filter: exclude data before DATA_START_YEAR
+        #    (WIA law 2003 caused a regime shift in Dutch absenteeism data)
+        if DATA_START_YEAR:
+            before = len(df)
+            df = df[df['period_enddate'].dt.year >= DATA_START_YEAR].copy()
+            n_dropped = before - len(df)
+            if n_dropped > 0:
+                f_log(f"Temporal filter: dropped {n_dropped} rows before {DATA_START_YEAR}", c_type="process")
 
     return df
 
 
-def transform_generic_feature_table(df: pd.DataFrame) -> pd.DataFrame:
+def transform_generic_feature_table(df: pd.DataFrame, lag_years: int = 0, filters: dict = None, exclude_metrics: list = None, keep_metrics: list = None) -> pd.DataFrame:
     """
     Transforms observational feature datasets dynamically into ML features.
     Applies strict pivoting by translating granular rows across all available dimensions into distinct column features.
+
+    Parameters
+    ----------
+    lag_years : int
+        Year shift for yearly tables (0 = no shift, 1 = last year's value).
+    filters : dict or None
+        Optional ``{column: value}`` row filters applied before pivoting.
+        Use to select a specific CBS aggregation level (e.g. ``{"Marges": "MW00000"}``).
+    exclude_metrics : list[str] or None
+        CBS metric name prefixes to exclude before pivoting.  Matching is
+        prefix-based: ``"AantalWerkdagenVerzuimd"`` excludes all columns
+        starting with that string (e.g. ``AantalWerkdagenVerzuimd_3``).
+        Use to remove target-proxy metrics that would cause data leakage.
+    keep_metrics : list[str] or None
+        Regex patterns for metric columns to **keep**.  Only columns matching
+        at least one pattern are retained; all others are dropped.  Matching
+        uses ``re.match`` (anchored to the start of the column name).
+        Applied before ``exclude_metrics``.
+        Example: ``["Score"]`` keeps only columns starting with "Score".
     """
-    df = apply_gold_baseline(df)
+    df = apply_gold_baseline(df, lag_years=lag_years)
+
+    # Apply table-specific dimensional filters (e.g., Marges == "MW00000")
+    if filters:
+        for col, value in filters.items():
+            if col in df.columns:
+                before = len(df)
+                df = df[df[col] == value].copy()
+                f_log(f"Filter {col}={value}: {before} → {len(df)} rows", c_type="process")
 
     import re
     # Extract all categorical dimension columns targeted for pivoting
@@ -337,12 +412,54 @@ def transform_generic_feature_table(df: pd.DataFrame) -> pd.DataFrame:
 
     value_cols = [c for c in df.columns if c not in index_cols + pivot_cols and pd.api.types.is_numeric_dtype(df[c])]
 
+    # Whitelist: keep only metric columns matching the patterns
+    if keep_metrics:
+        before_n = len(value_cols)
+        value_cols = [
+            c for c in value_cols
+            if any(re.match(pattern, c) for pattern in keep_metrics)
+        ]
+        f_log(f"keep_metrics: {before_n} → {len(value_cols)} metric columns "
+              f"(patterns: {keep_metrics})", c_type="process")
+
+    # Blacklist: exclude target-proxy or unwanted metric columns before pivoting
+    if exclude_metrics:
+        before_n = len(value_cols)
+        value_cols = [
+            c for c in value_cols
+            if not any(c.startswith(prefix) for prefix in exclude_metrics)
+        ]
+        n_excluded = before_n - len(value_cols)
+        if n_excluded > 0:
+            f_log(f"Excluded {n_excluded} metric columns matching {exclude_metrics}", c_type="process")
+
     if pivot_cols and not df.empty:
-        df_pivoted = df.pivot_table(index=index_cols, columns=pivot_cols, values=value_cols, aggfunc='sum')
+        # Duplicate detection: warn if the pivot would aggregate multiple rows
+        # into a single cell.  For clean data (no duplicates) mean == sum == the
+        # single value, so the choice is invisible.  For dirty data, mean is safe
+        # for both additive metrics (volumes) and non-additive metrics (rates, %).
+        dup_key = index_cols + pivot_cols
+        n_dups = df.duplicated(subset=dup_key, keep=False).sum()
+        if n_dups > 0:
+            f_log(
+                f"Pivot has {n_dups} duplicate (index × dimension) rows. "
+                f"Using mean aggregation. Consider adding a 'filters' parameter "
+                f"to select a specific aggregation level.",
+                c_type="warning",
+            )
+
+        df_pivoted = df.pivot_table(index=index_cols, columns=pivot_cols, values=value_cols, aggfunc='mean')
         # Flatten MultiIndex hierarchical columns
         df_pivoted.columns = ['_'.join(map(str, col)).strip() for col in df_pivoted.columns.values]
         df_pivoted = df_pivoted.reset_index()
         df = df_pivoted
+
+    # Prefix yearly-origin feature columns so downstream code can identify them
+    if lag_years > 0:
+        structural = {'period_enddate', 'BedrijfstakkenBranchesSBI2008', 'year', 'quarter'}
+        rename_map = {c: f"y_{c}" for c in df.columns if c not in structural}
+        df = df.rename(columns=rename_map)
+        f_log(f"Prefixed {len(rename_map)} feature columns with 'y_' (yearly origin).", c_type="process")
 
     return df
 
@@ -387,6 +504,8 @@ def transform_target_fact_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # Dynamic Registry Maps Model Identity -> Bound Transformation Function
+from functools import partial
+
 TRANSFORMATION_REGISTRY = {
     "80072ned": transform_target_fact_table,
     "83415NED": transform_generic_feature_table,
@@ -394,13 +513,45 @@ TRANSFORMATION_REGISTRY = {
     "85918NED": transform_generic_feature_table,
     "85919NED": transform_generic_feature_table,
     "85920NED": transform_generic_feature_table,
-    "80590eng": transform_generic_feature_table
 }
+
+# Register yearly tables with their publication lag
+for _tid, _lag in CBS_TABLES_YEARLY.items():
+    if _tid not in TRANSFORMATION_REGISTRY:
+        TRANSFORMATION_REGISTRY[_tid] = partial(transform_generic_feature_table, lag_years=_lag)
+
+# Manual filters and overrides for specific tables can be registered here:
+# Filter 86009NED (yearly sick leave: exclude metrics that directly measure absence → target proxies)
+TRANSFORMATION_REGISTRY["86009NED"] = partial(
+    transform_generic_feature_table, lag_years=1,
+    filters={"Marges": "MW00000"},
+    exclude_metrics=[
+        "Ziekteverzuimpercentage",       # the target itself
+        "AantalWerkdagenVerzuimd",       # days absent (direct measure)
+        "k_1Tot5Werkdagen",              # absence duration category
+        "k_5Tot20Werkdagen",             # absence duration category
+        "k_20WerkdagenOfMeer",           # absence duration category
+        "VerzuimGevallen",               # absence cases count
+        "Meldingsfrequentie",            # absence reporting frequency
+        "ZiekteverzuimFrequentie",       # absence frequency
+    ],
+)
+# Filter 85542NED (yearly wellbeing: keep only Score* metrics)
+TRANSFORMATION_REGISTRY["85542NED"] = partial(
+    transform_generic_feature_table, lag_years=1,
+    filters={"Marges": "MW00000", "Kenmerken": "T009002"},
+    keep_metrics=["Score"],
+)
+# Filter 85920NED (quarterly, with TypeWerkenden filter)
+TRANSFORMATION_REGISTRY["85920NED"] = partial(
+    transform_generic_feature_table, filters={"TypeWerkenden": "T001413"}
+)
 
 if __name__ == "__main__":
     db = DatabaseGold(DIR_DB_SILVER, DIR_DB_GOLD)
 
-    for table_id in CBS_TABLES_T65:
+    all_tables = list(CBS_TABLES_TO_LOAD) + [t for t in CBS_TABLES_YEARLY if t not in CBS_TABLES_TO_LOAD]
+    for table_id in all_tables:
         if table_id in TRANSFORMATION_REGISTRY:
             db.process_silver_table(table_id, TRANSFORMATION_REGISTRY[table_id])
         else:
