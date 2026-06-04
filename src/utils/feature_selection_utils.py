@@ -632,6 +632,7 @@ def apply_granger_filter(
     min_sector_fraction: float = 0.20,
     sector_col: str | None = None,
     difference: bool = True,
+    n_jobs: int = -1,
 ) -> dict[str, Any]:
     """Keep features that Granger-cause the target in enough sectors.
 
@@ -658,6 +659,8 @@ def apply_granger_filter(
     difference : bool, default True
         First-difference the data before testing (recommended for
         non-stationary panel data).
+    n_jobs : int, default -1
+        Number of parallel jobs.  -1 uses all available CPU cores.
 
     Returns
     -------
@@ -672,63 +675,21 @@ def apply_granger_filter(
             for sector, group in df.groupby(sector_col)
         ]
 
-    scores: dict[str, float] = {}
-    n_features = len(feature_list)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_granger_single_feature)(
+            feat, sector_groups, target, max_lag, p_threshold, difference,
+        )
+        for feat in feature_list
+    )
 
-    for feat_idx, feat in enumerate(feature_list):
-        if (feat_idx + 1) % 50 == 0 or feat_idx == 0:
-            logger.debug("granger                processing feature %d/%d",
-                         feat_idx + 1, n_features)
-        sector_results: list[bool] = []
-        n_skipped_gaps = 0
-        n_failed = 0
-        last_failure_reason = ""
-
-        for sector, group_sorted in sector_groups:
-            data = group_sorted[[target, feat]].dropna()
-
-            # Check temporal contiguity before differencing
-            full_time = group_sorted[TIME_COL]
-            positions = full_time.index.get_indexer(data.index)
-            gaps = np.diff(positions)
-            if len(positions) > 1 and (gaps > 1).any():
-                n_skipped_gaps += 1
-                continue
-
-            if difference:
-                data = data.diff().iloc[1:]
-
-            if len(data) < 3 * max_lag:
-                continue
-
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    test_out = grangercausalitytests(
-                        data[[target, feat]].values, maxlag=max_lag, verbose=False,
-                    )
-                min_p = min(
-                    test_out[lag][0]["ssr_ftest"][1]
-                    for lag in range(1, max_lag + 1)
-                )
-                sector_results.append(min_p < p_threshold)
-            except Exception as exc:
-                n_failed += 1
-                last_failure_reason = str(exc)
-                continue
-
-        if n_skipped_gaps > 0:
-            logger.debug("granger  %s: skipped %d/%d sectors (temporal gaps)",
-                         feat, n_skipped_gaps, len(sector_groups))
-        if n_failed > 0:
-            logger.debug("granger  %s: failed %d/%d sectors (%s)",
-                         feat, n_failed, len(sector_groups), last_failure_reason)
-
-        if sector_results:
-            frac = sum(sector_results) / len(sector_results)
-        else:
-            frac = 0.0
+    scores = {}
+    for feat, frac, n_tested, n_skipped, n_failed in results:
         scores[feat] = frac
+        if n_skipped > 0 or n_failed > 0:
+            logger.debug(
+                "granger  %s: tested=%d, skipped=%d (gaps), failed=%d  →  frac=%.2f",
+                feat, n_tested, n_skipped, n_failed, frac,
+            )
 
     retained = [f for f in feature_list if scores.get(f, 0.0) >= min_sector_fraction]
     dropped = [f for f in feature_list if scores.get(f, 0.0) < min_sector_fraction]
@@ -744,6 +705,68 @@ def apply_granger_filter(
                          "min_sector_fraction": min_sector_fraction,
                          "sector_col": sector_col, "difference": difference},
                         feature_list, retained, dropped, scores)
+
+
+def _granger_single_feature(
+    feat: str,
+    sector_groups: list,
+    target: str,
+    max_lag: int,
+    p_threshold: float,
+    difference: bool,
+) -> tuple[str, float, int, int, int]:
+    """Run Granger causality for one feature across all sectors.
+
+    Called in parallel by ``apply_granger_filter``.
+
+    Returns
+    -------
+    tuple[str, float, int, int, int]
+        ``(feature_name, frac_significant, n_tested, n_skipped, n_failed)``
+    """
+    sector_results: list[bool] = []
+    n_skipped = 0
+    n_failed = 0
+
+    for sector, group_sorted in sector_groups:
+        data = group_sorted[[target, feat]].dropna()
+
+        # Check temporal contiguity
+        full_time = group_sorted[TIME_COL]
+        positions = full_time.index.get_indexer(data.index)
+        gaps = np.diff(positions)
+        if len(positions) > 1 and (gaps > 1).any():
+            n_skipped += 1
+            continue
+
+        if difference:
+            data = data.diff().iloc[1:]
+
+        if len(data) < 3 * max_lag:
+            n_skipped += 1
+            continue
+
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                test_out = grangercausalitytests(
+                    data[[target, feat]].values, maxlag=max_lag, verbose=False,
+                )
+            min_p = min(
+                test_out[lag][0]["ssr_ftest"][1]
+                for lag in range(1, max_lag + 1)
+            )
+            sector_results.append(min_p < p_threshold)
+        except Exception:
+            n_failed += 1
+            continue
+
+    if sector_results:
+        frac = sum(sector_results) / len(sector_results)
+    else:
+        frac = 0.0
+
+    return feat, frac, len(sector_results), n_skipped, n_failed
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -923,7 +946,7 @@ def _lasso_bootstrap_loop(
     # Step 1: find optimal alpha from full data (one LassoCV, ~500 internal fits)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        lasso_cv = LassoCV(cv=5, random_state=random_state, max_iter=10_000, tol=1e-2)
+        lasso_cv = LassoCV(cv=5, random_state=random_state, max_iter=10_000, tol=1e-4, n_jobs=-1)
         lasso_cv.fit(X, y)
     alpha = lasso_cv.alpha_
 
@@ -953,7 +976,7 @@ def _single_lasso_bootstrap(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        lasso = Lasso(alpha=alpha, max_iter=10_000, tol=1e-2)
+        lasso = Lasso(alpha=alpha, max_iter=10_000, tol=1e-3)
         lasso.fit(X[idx], y[idx])
 
     return (np.abs(lasso.coef_) > 1e-10).astype(np.float64)
@@ -1398,3 +1421,96 @@ def evaluate_yearly_features(
          "year_col": year_col, "sector_col": sector_col},
         yearly_feature_cols, retained, dropped, scores,
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PRESET MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+def deduplicate_presets(
+    preset_dir: str | Path,
+    pattern: str = "preset_*.json",
+    dry_run: bool = False,
+) -> dict[str, list[str]]:
+    """Compare preset JSON files and remove duplicates with identical feature sets.
+
+    Two presets are considered duplicates if they contain exactly the same
+    set of survivor feature names (order-independent).  When duplicates are
+    found, the preset whose name comes first alphabetically is kept and the
+    others are deleted.
+
+    Parameters
+    ----------
+    preset_dir : str or Path
+        Directory containing preset JSON files.
+    pattern : str, default ``"preset_*.json"``
+        Glob pattern for preset files.
+    dry_run : bool, default False
+        If True, report duplicates without deleting anything.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Maps each kept preset filename to a list of deleted duplicate
+        filenames.  Empty dict means no duplicates found.
+    """
+    preset_dir = Path(preset_dir)
+    preset_files = sorted(preset_dir.glob(pattern))
+
+    if not preset_files:
+        print(f"No preset files matching '{pattern}' in {preset_dir}")
+        return {}
+
+    # Load feature sets from each preset
+    presets: dict[str, frozenset[str]] = {}
+    for path in preset_files:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            # Extract survivor feature names
+            survivors = set()
+            if "survivors" in data:
+                survivors = set(data["survivors"])
+            elif "feature_groups" in data:
+                for group in data["feature_groups"].values():
+                    if isinstance(group, dict) and "columns" in group:
+                        survivors.update(group["columns"])
+                    elif isinstance(group, list):
+                        survivors.update(group)
+            presets[path.name] = frozenset(survivors)
+        except Exception as e:
+            print(f"  ⚠️ Could not read {path.name}: {e}")
+            continue
+
+    # Group by identical feature sets
+    seen: dict[frozenset[str], str] = {}  # feature_set → first preset name
+    duplicates: dict[str, list[str]] = {}  # kept_name → [deleted_names]
+
+    for name, features in presets.items():
+        if features in seen:
+            kept = seen[features]
+            duplicates.setdefault(kept, []).append(name)
+        else:
+            seen[features] = name
+
+    if not duplicates:
+        print(f"✅ No duplicates found among {len(presets)} presets.")
+        return {}
+
+    # Report and optionally delete
+    for kept, dupes in duplicates.items():
+        n_features = len(presets[kept])
+        print(f"\n  Kept:    {kept} ({n_features} features)")
+        for dupe in dupes:
+            if dry_run:
+                print(f"  Would delete: {dupe} (identical)")
+            else:
+                (preset_dir / dupe).unlink()
+                print(f"  🗑️ Deleted: {dupe} (identical to {kept})")
+
+    action = "would delete" if dry_run else "deleted"
+    total_dupes = sum(len(d) for d in duplicates.values())
+    remaining = len(presets) - total_dupes
+    print(f"\nSummary: {total_dupes} duplicates {action}, {remaining} unique presets remain.")
+
+    return duplicates

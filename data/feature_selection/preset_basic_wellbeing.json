@@ -1,0 +1,268 @@
+{
+  "preset": "basic_wellbeing",
+  "description": "Preset 'basic_wellbeing': categories ['labor_volume', 'working_conditions', 'wellbeing']",
+  "timestamp": "2026-06-04T18:39:11.622389+00:00",
+  "input_shape": [
+    3549,
+    212
+  ],
+  "n_survivors": 25,
+  "surviving_features": [
+    "BeloningPerGewerktUur_14",
+    "y_ScoreZorgenOverFinancieleToekomst_41_T009002_MW00000",
+    "y_ScoreTevredenheidMetWerk_13_T009002_MW00000",
+    "y_PsychischOverspannenheidBurnOut_13_MW00000",
+    "y_BuikMaagOfDarmen_17_MW00000",
+    "y_Huid_18_MW00000",
+    "y_HeupBenenKnieenVoeten_11_MW00000",
+    "y_LangdurigDezelfdeHandelingOfPcWerk_48_MW00000",
+    "y_ProblemenMetKlanten_52_MW00000",
+    "WerkzamePersonen_1_A045285_T001038",
+    "y_ScoreTevredenheidMetWoning_45_T009002_MW00000",
+    "y_ScoreTevredenheidOpleidingskansen_9_T009002_MW00000",
+    "y_ScoreGeluk_1_T009002_MW00000",
+    "y_ScoreTevredenheidMetSociaalLeven_57_T009002_MW00000",
+    "BeloningPerArbeidsjaar_17",
+    "LonenPerArbeidsjaar_18",
+    "LoonkostenPerArbeidsjaar_19",
+    "BeloningPerGewerktUur_20",
+    "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
+    "GewerkteUren_24",
+    "GewerkteUren_3_A045285_T001038",
+    "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
+    "Totaal_30",
+    "GewerkteUrenPerBaan_10_A045286_T001038",
+    "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038"
+  ],
+  "ungrouped_survivors": [],
+  "filter_chain": [
+    {
+      "filter": "near_constant",
+      "params": {
+        "max_fraction": 0.95
+      },
+      "n_input": 212,
+      "n_retained": 212,
+      "n_dropped": 0
+    },
+    {
+      "filter": "yearly_evaluation",
+      "params": {
+        "corr_threshold": 0.4,
+        "lag_threshold": 0.4,
+        "year_col": "year",
+        "sector_col": "sector"
+      },
+      "n_input": 98,
+      "n_retained": 38,
+      "n_dropped": 60
+    },
+    {
+      "filter": "correlation",
+      "params": {
+        "threshold": 0.21,
+        "method": "within_sector_differenced",
+        "sector_col": "sector"
+      },
+      "n_input": 114,
+      "n_retained": 34,
+      "n_dropped": 80
+    },
+    {
+      "filter": "lagged_correlation",
+      "params": {
+        "threshold": 0.12,
+        "horizons": [
+          1,
+          2,
+          3
+        ],
+        "sector_col": "sector"
+      },
+      "n_input": 114,
+      "n_retained": 111,
+      "n_dropped": 3
+    },
+    {
+      "filter": "granger",
+      "params": {
+        "max_lag": 4,
+        "p_threshold": 0.05,
+        "min_sector_fraction": 0.2,
+        "sector_col": "sector",
+        "difference": true
+      },
+      "n_input": 114,
+      "n_retained": 83,
+      "n_dropped": 31
+    },
+    {
+      "filter": "lasso_stability",
+      "params": {
+        "n_bootstraps": 100,
+        "threshold": 0.6,
+        "random_state": 42,
+        "horizons": [
+          1,
+          2,
+          3
+        ],
+        "sector_col": "sector"
+      },
+      "n_input": 114,
+      "n_retained": 43,
+      "n_dropped": 71
+    },
+    {
+      "filter": "redundancy",
+      "params": {
+        "threshold": 0.9,
+        "sector_col": "sector"
+      },
+      "n_input": 93,
+      "n_retained": 46,
+      "n_dropped": 47
+    }
+  ],
+  "feature_groups": {
+    "BeloningPerArbeidsjaar": {
+      "columns": [
+        "BeloningPerArbeidsjaar_17"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: BeloningPerArbeidsjaar (1 features, source unknown)."
+    },
+    "BeloningPerGewerktUur": {
+      "columns": [
+        "BeloningPerGewerktUur_14",
+        "BeloningPerGewerktUur_20"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: BeloningPerGewerktUur (2 features, source unknown)."
+    },
+    "LonenPerArbeidsjaar": {
+      "columns": [
+        "LonenPerArbeidsjaar_18"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: LonenPerArbeidsjaar (1 features, source unknown)."
+    },
+    "LoonkostenPerArbeidsjaar": {
+      "columns": [
+        "LoonkostenPerArbeidsjaar_19"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: LoonkostenPerArbeidsjaar (1 features, source unknown)."
+    },
+    "Totaal": {
+      "columns": [
+        "Totaal_30"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: Totaal (1 features, source unknown)."
+    },
+    "labor_volume": {
+      "columns": [
+        "GewerkteUrenPerBaan_10_A045286_T001038",
+        "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
+        "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038",
+        "GewerkteUren_24",
+        "GewerkteUren_3_A045285_T001038"
+      ],
+      "source_table": "85920NED",
+      "description": "CBS metrics: GewerkteUren, GewerkteUrenPerBaan, GewerkteUrenPerWerkzamePersoon (5 features, 85920NED)."
+    },
+    "workforce": {
+      "columns": [
+        "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
+        "WerkzamePersonen_1_A045285_T001038"
+      ],
+      "source_table": "85920NED",
+      "description": "CBS metrics: WerkzamePersonen, WerkzamePersonenSeizoengecorrigeerd (2 features, 85920NED)."
+    },
+    "y_BuikMaagOfDarmen": {
+      "columns": [
+        "y_BuikMaagOfDarmen_17_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_BuikMaagOfDarmen (1 features, source unknown)."
+    },
+    "y_HeupBenenKnieenVoeten": {
+      "columns": [
+        "y_HeupBenenKnieenVoeten_11_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_HeupBenenKnieenVoeten (1 features, source unknown)."
+    },
+    "y_Huid": {
+      "columns": [
+        "y_Huid_18_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_Huid (1 features, source unknown)."
+    },
+    "y_LangdurigDezelfdeHandelingOfPcWerk": {
+      "columns": [
+        "y_LangdurigDezelfdeHandelingOfPcWerk_48_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_LangdurigDezelfdeHandelingOfPcWerk (1 features, source unknown)."
+    },
+    "y_ProblemenMetKlanten": {
+      "columns": [
+        "y_ProblemenMetKlanten_52_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ProblemenMetKlanten (1 features, source unknown)."
+    },
+    "y_PsychischOverspannenheidBurnOut": {
+      "columns": [
+        "y_PsychischOverspannenheidBurnOut_13_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_PsychischOverspannenheidBurnOut (1 features, source unknown)."
+    },
+    "y_ScoreGeluk": {
+      "columns": [
+        "y_ScoreGeluk_1_T009002_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ScoreGeluk (1 features, source unknown)."
+    },
+    "y_ScoreTevredenheidMetSociaalLeven": {
+      "columns": [
+        "y_ScoreTevredenheidMetSociaalLeven_57_T009002_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ScoreTevredenheidMetSociaalLeven (1 features, source unknown)."
+    },
+    "y_ScoreTevredenheidMetWerk": {
+      "columns": [
+        "y_ScoreTevredenheidMetWerk_13_T009002_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ScoreTevredenheidMetWerk (1 features, source unknown)."
+    },
+    "y_ScoreTevredenheidMetWoning": {
+      "columns": [
+        "y_ScoreTevredenheidMetWoning_45_T009002_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ScoreTevredenheidMetWoning (1 features, source unknown)."
+    },
+    "y_ScoreTevredenheidOpleidingskansen": {
+      "columns": [
+        "y_ScoreTevredenheidOpleidingskansen_9_T009002_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ScoreTevredenheidOpleidingskansen (1 features, source unknown)."
+    },
+    "y_ScoreZorgenOverFinancieleToekomst": {
+      "columns": [
+        "y_ScoreZorgenOverFinancieleToekomst_41_T009002_MW00000"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: y_ScoreZorgenOverFinancieleToekomst (1 features, source unknown)."
+    }
+  }
+}
