@@ -25,6 +25,7 @@ import mlflow.sklearn
 import pandas as pd
 from sktime.forecasting.base import ForecastingHorizon
 from sktime.forecasting.model_selection import ExpandingWindowSplitter, ForecastingGridSearchCV
+from sktime.performance_metrics.forecasting import MeanSquaredError
 from sqlalchemy.orm import Session
 
 from src.ml_engineering.model_configs import (
@@ -91,6 +92,7 @@ class ModelTrainer:
                 "target": lineage["target"],
                 "sector": lineage.get("sector", "T001081"),
                 "forecast_horizon": "4Q",
+                "preset": os.environ.get("PRESET_NAME", "unknown"),
             })
             fitted_model = self._fit_or_tune(experiment, x_train, y_train, run_id)
             self._log_model_artifact(fitted_model, x_train, y_train)
@@ -129,8 +131,7 @@ class ModelTrainer:
             forecaster=estimator,
             param_grid=experiment.param_grid,
             cv=cv,
-            scoring="neg_mean_squared_error",
-            n_jobs=-1,
+            scoring=MeanSquaredError(square_root=False),
         )
         grid.fit(y=y_train, X=X)
         self._store_tuning_results(run_id, grid.cv_results_)

@@ -7,11 +7,27 @@ Single source of truth for:
 - Domain-specific baseline forecaster (SectorQuarterRollingMean)
 - Feature catalog (named feature groups with source metadata)
 - Estimator configurations (ModelConfiguration catalog)
+
+Feature catalog loading
+-----------------------
+``FEATURE_CATALOG`` is populated in one of two ways:
+
+1. **From a preset JSON** (preferred): if ``DIR_FEATURE_SELECTION`` contains a
+   file named in ``_ACTIVE_PRESET_NAME``, ``load_feature_catalog()`` reads it
+   and constructs ``FeatureGroup`` instances.  This is the output of the
+   ``feature_selection.py`` script.
+
+2. **Hardcoded fallback**: if no preset file exists, the catalog falls back to
+   a manually defined dict.  This ensures the pipeline runs even before any
+   feature selection has been performed.
 """
+import json
+import logging
 import numpy as np
 import pandas as pd
 import polars as pl
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -20,11 +36,22 @@ from sklearn.ensemble import (
     HistGradientBoostingRegressor,
     RandomForestRegressor,
 )
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
 from sktime.forecasting.compose import make_reduction
 from sqlalchemy import String, Float, LargeBinary, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
+
+# Defensive import: DIR_FEATURE_SELECTION may not exist in config.py yet.
+# If missing, fall back to the conventional path so the pipeline still runs.
+try:
+    from src.config import DIR_FEATURE_SELECTION
+except ImportError:
+    DIR_FEATURE_SELECTION = (
+        Path(__file__).resolve().parent.parent.parent / "data" / "feature_selection"
+    )
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +196,76 @@ class FeatureGroup:
     description: str
 
 
-FEATURE_CATALOG: Dict[str, FeatureGroup] = {
+def load_feature_catalog(preset_path: Path) -> Dict[str, FeatureGroup]:
+    """Build a ``FEATURE_CATALOG`` from a feature selection preset JSON.
+
+    The JSON is produced by ``feature_selection.py``'s ``build_presets()``
+    function.  Its ``feature_groups`` dict maps group names to dicts with
+    ``columns``, ``source_table``, and ``description`` — exactly the fields
+    of ``FeatureGroup``.
+
+    In addition to the named groups, an ``all_survivors`` meta-group is
+    created containing every feature that survived the filter pipeline.
+    Models can reference ``feature_groups=["all_survivors"]`` to use the
+    full preset without needing to list individual groups.
+
+    Parameters
+    ----------
+    preset_path : Path
+        Path to a preset JSON file (e.g. ``preset_domain_labor.json``).
+
+    Returns
+    -------
+    dict[str, FeatureGroup]
+        Feature catalog ready for use by ``DataExtractor._resolve_groups()``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the preset file does not exist.
+    KeyError
+        If the JSON is missing the ``feature_groups`` key.
+    """
+    with open(preset_path) as fh:
+        preset = json.load(fh)
+
+    groups = preset["feature_groups"]
+    catalog: Dict[str, FeatureGroup] = {}
+    for name, meta in groups.items():
+        catalog[name] = FeatureGroup(
+            name=name,
+            columns=meta["columns"],
+            source_table=meta.get("source_table", ""),
+            description=meta.get("description", ""),
+        )
+
+    # Add a catch-all group containing every surviving feature, regardless
+    # of which named group it belongs to.  This lets models use
+    # feature_groups=["all_survivors"] to get the full preset.
+    all_features = preset.get("surviving_features", [])
+    if all_features:
+        catalog["all_survivors"] = FeatureGroup(
+            name="all_survivors",
+            columns=all_features,
+            source_table="",
+            description=(
+                f"All {len(all_features)} features that survived the "
+                f"'{preset.get('preset', 'unknown')}' filter pipeline."
+            ),
+        )
+
+    return catalog
+
+
+# ---------------------------------------------------------------------------
+# FEATURE_CATALOG — loaded from preset JSON or hardcoded fallback
+# ---------------------------------------------------------------------------
+
+#: Name of the active preset file inside DIR_FEATURE_SELECTION.
+#: Change this to switch between presets (e.g. "preset_minimal_stable.json").
+_ACTIVE_PRESET_NAME: str = "preset_domain_labor.json"
+
+_HARDCODED_CATALOG: Dict[str, FeatureGroup] = {
     "labor_volume": FeatureGroup(
         name="labor_volume",
         columns=[
@@ -209,6 +305,31 @@ FEATURE_CATALOG: Dict[str, FeatureGroup] = {
         description="Number of jobs and employed persons, seasonally adjusted, by sector and category (85920NED).",
     ),
 }
+
+# Try loading from preset; fall back to hardcoded if the file doesn't exist
+# or is malformed.  A bad preset file must never crash the pipeline at import.
+_preset_path = DIR_FEATURE_SELECTION / _ACTIVE_PRESET_NAME
+FEATURE_CATALOG: Dict[str, FeatureGroup]
+
+if _preset_path.exists():
+    try:
+        FEATURE_CATALOG = load_feature_catalog(_preset_path)
+        _logger.debug(
+            "FEATURE_CATALOG loaded from preset: %s (%d groups)",
+            _preset_path.name, len(FEATURE_CATALOG),
+        )
+    except Exception as _exc:
+        FEATURE_CATALOG = _HARDCODED_CATALOG
+        _logger.warning(
+            "Failed to load preset %s: %s — using hardcoded fallback",
+            _preset_path.name, _exc,
+        )
+else:
+    FEATURE_CATALOG = _HARDCODED_CATALOG
+    _logger.debug(
+        "FEATURE_CATALOG using hardcoded fallback (no preset at %s)",
+        _preset_path,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +375,7 @@ class ModelConfiguration:
         "linear": ModelExperiment(
             name="LinearRegression_Reduced",
             estimator=make_reduction(LinearRegression(), window_length=12, strategy="recursive"),
-            param_grid={"window_length": [8, 12, 16]},
+            param_grid={"window_length": [4, 8, 12]},
             feature_groups=["labor_volume"],
             description="LinearRegression via make_reduction recursive lag-window forecaster.",
         ),
@@ -264,7 +385,7 @@ class ModelConfiguration:
                 RandomForestRegressor(random_state=42), window_length=12, strategy="recursive"
             ),
             param_grid={
-                "window_length": [8, 12],
+                "window_length": [4, 8],
                 "estimator__n_estimators": [100, 200],
                 "estimator__max_depth": [5, 10, None],
             },
@@ -277,7 +398,7 @@ class ModelConfiguration:
                 GradientBoostingRegressor(random_state=42), window_length=12, strategy="recursive"
             ),
             param_grid={
-                "window_length": [8, 12],
+                "window_length": [4, 8],
                 "estimator__n_estimators": [100, 200],
                 "estimator__learning_rate": [0.05, 0.1],
             },
@@ -290,12 +411,51 @@ class ModelConfiguration:
                 HistGradientBoostingRegressor(random_state=42), window_length=12, strategy="recursive"
             ),
             param_grid={
-                "window_length": [8, 12],
+                "window_length": [4, 8],
                 "estimator__learning_rate": [0.05, 0.1],
                 "estimator__max_iter": [100, 300],
             },
             feature_groups=["labor_volume", "workforce"],
             description="HistGradientBoosting via make_reduction (recursive).",
+        ),
+        "ridge": ModelExperiment(
+            name="Ridge_Reduced",
+            estimator=make_reduction(Ridge(), window_length=12, strategy="recursive"),
+            param_grid={
+                "window_length": [4, 8],
+                "estimator__alpha": [0.1, 1.0, 10.0, 100.0, 1000.0],
+            },
+            feature_groups=["all_survivors"],
+            description="Ridge via make_reduction. L2 regularization.",
+        ),
+        "elasticnet": ModelExperiment(
+            name="ElasticNet_Reduced",
+            estimator=make_reduction(
+                ElasticNet(max_iter=10_000), window_length=12, strategy="recursive"
+            ),
+            param_grid={
+                "window_length": [4, 8],
+                "estimator__alpha": [0.01, 0.1, 1.0, 10.0],
+                "estimator__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9],
+            },
+            feature_groups=["all_survivors"],
+            description="ElasticNet via make_reduction. L1+L2 regularization.",
+        ),
+        "hist_gbr": ModelExperiment(
+            name="HistGBR_Reduced",
+            estimator=make_reduction(
+                HistGradientBoostingRegressor(random_state=42),
+                window_length=12, strategy="recursive",
+            ),
+            param_grid={
+                "window_length": [4, 8],
+                "estimator__max_iter": [100, 300],
+                "estimator__max_depth": [3, 5],
+                "estimator__learning_rate": [0.05, 0.1],
+                "estimator__min_samples_leaf": [10, 20],
+            },
+            feature_groups=["all_survivors"],
+            description="HistGradientBoosting via make_reduction. Non-linear. Preset-driven.",
         ),
         # Prophet removed: unsuitable for quarterly 4Q-ahead forecasting.
         # Reasons: (1) designed for high-frequency data (daily/weekly), not 4 obs/year;

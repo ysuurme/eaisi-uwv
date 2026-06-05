@@ -362,10 +362,10 @@ def transform_generic_feature_table(df: pd.DataFrame, lag_years: int = 0, filter
         Optional ``{column: value}`` row filters applied before pivoting.
         Use to select a specific CBS aggregation level (e.g. ``{"Marges": "MW00000"}``).
     exclude_metrics : list[str] or None
-        CBS metric name prefixes to exclude before pivoting.  Matching is
-        prefix-based: ``"AantalWerkdagenVerzuimd"`` excludes all columns
-        starting with that string (e.g. ``AantalWerkdagenVerzuimd_3``).
-        Use to remove target-proxy metrics that would cause data leakage.
+        Regex patterns for metric columns to **exclude** before pivoting.
+        Matching uses ``re.search`` (case-insensitive, matches anywhere in
+        column name).  Example: ``["Mannen", "Vrouwen"]`` excludes any
+        column containing those strings.
     keep_metrics : list[str] or None
         Regex patterns for metric columns to **keep**.  Only columns matching
         at least one pattern are retained; all others are dropped.  Matching
@@ -380,7 +380,12 @@ def transform_generic_feature_table(df: pd.DataFrame, lag_years: int = 0, filter
         for col, value in filters.items():
             if col in df.columns:
                 before = len(df)
-                df = df[df[col] == value].copy()
+                if isinstance(value, (list, tuple)):
+                    # Multi-value filter: keep rows matching ANY of the values
+                    str_values = [str(v) for v in value]
+                    df = df[df[col].astype(str).isin(str_values)].copy()
+                else:
+                    df = df[df[col].astype(str) == str(value)].copy()
                 f_log(f"Filter {col}={value}: {before} → {len(df)} rows", c_type="process")
 
     import re
@@ -427,7 +432,7 @@ def transform_generic_feature_table(df: pd.DataFrame, lag_years: int = 0, filter
         before_n = len(value_cols)
         value_cols = [
             c for c in value_cols
-            if not any(c.startswith(prefix) for prefix in exclude_metrics)
+            if not any(re.search(pattern, c, re.IGNORECASE) for pattern in exclude_metrics)
         ]
         n_excluded = before_n - len(value_cols)
         if n_excluded > 0:
@@ -453,6 +458,10 @@ def transform_generic_feature_table(df: pd.DataFrame, lag_years: int = 0, filter
         df_pivoted.columns = ['_'.join(map(str, col)).strip() for col in df_pivoted.columns.values]
         df_pivoted = df_pivoted.reset_index()
         df = df_pivoted
+    else:
+        # No pivot — apply keep/exclude directly on the DataFrame
+        cols_to_keep = index_cols + value_cols
+        df = df[cols_to_keep].copy()
 
     # Prefix yearly-origin feature columns so downstream code can identify them
     if lag_years > 0:
@@ -506,46 +515,70 @@ def transform_target_fact_table(df: pd.DataFrame) -> pd.DataFrame:
 # Dynamic Registry Maps Model Identity -> Bound Transformation Function
 from functools import partial
 
+# 1. Define the dict FIRST
 TRANSFORMATION_REGISTRY = {
     "80072ned": transform_target_fact_table,
-    "83415NED": transform_generic_feature_table,
-    "85916NED": transform_generic_feature_table,
-    "85918NED": transform_generic_feature_table,
-    "85919NED": transform_generic_feature_table,
-    "85920NED": transform_generic_feature_table,
 }
 
-# Register yearly tables with their publication lag
+# Auto-register yearly tables with their publication lag
 for _tid, _lag in CBS_TABLES_YEARLY.items():
     if _tid not in TRANSFORMATION_REGISTRY:
         TRANSFORMATION_REGISTRY[_tid] = partial(transform_generic_feature_table, lag_years=_lag)
 
-# Manual filters and overrides for specific tables can be registered here:
-# Filter 86009NED (yearly sick leave: exclude metrics that directly measure absence → target proxies)
+# Auto-register quarterly tables with default transformation
+for _tid in CBS_TABLES_TO_LOAD:
+    if _tid not in TRANSFORMATION_REGISTRY:
+        TRANSFORMATION_REGISTRY[_tid] = transform_generic_feature_table
+
+# ── Manual overrides (tables that need filters) ──────────────────────────
 TRANSFORMATION_REGISTRY["86009NED"] = partial(
     transform_generic_feature_table, lag_years=1,
     filters={"Marges": "MW00000"},
     exclude_metrics=[
-        "Ziekteverzuimpercentage",       # the target itself
-        "AantalWerkdagenVerzuimd",       # days absent (direct measure)
-        "k_1Tot5Werkdagen",              # absence duration category
-        "k_5Tot20Werkdagen",             # absence duration category
-        "k_20WerkdagenOfMeer",           # absence duration category
-        "VerzuimGevallen",               # absence cases count
-        "Meldingsfrequentie",            # absence reporting frequency
-        "ZiekteverzuimFrequentie",       # absence frequency
+        "Ziekteverzuimpercentage",
+        "AantalWerkdagenVerzuimd",
+        "k_1Tot5Werkdagen",
+        "k_5Tot20Werkdagen",
+        "k_20Tot210Werkdagen",
+        "k_210WerkdagenOfMeer",
+        "VerzuimGevallen",
+        "Meldingsfrequentie",
+        "ZiekteverzuimFrequentie", 
+        "AandeelWerknemersDieHebbenVerzuimd",     
+        "AantalKeerVerzuimd", 
+        "AantalWerkdagenMeestRecenteVerzuim",
+        "WeetNiet",
+        "AndereReden",
     ],
 )
-# Filter 85542NED (yearly wellbeing: keep only Score* metrics)
 TRANSFORMATION_REGISTRY["85542NED"] = partial(
     transform_generic_feature_table, lag_years=1,
     filters={"Marges": "MW00000", "Kenmerken": "T009002"},
     keep_metrics=["Score"],
 )
-# Filter 85920NED (quarterly, with TypeWerkenden filter)
 TRANSFORMATION_REGISTRY["85920NED"] = partial(
     transform_generic_feature_table, filters={"TypeWerkenden": "T001413"}
 )
+TRANSFORMATION_REGISTRY["80590ned"] = partial(
+    transform_generic_feature_table, filters={"Geslacht": "T001038"}
+)
+TRANSFORMATION_REGISTRY["81433ned"] = partial(
+    transform_generic_feature_table, lag_years=1,  # ← was missing
+    filters={"GeslachtWerknemer": "T001038", "Dienstverband": "T001007", "KenmerkenBaan": "10000"}
+)
+TRANSFORMATION_REGISTRY["85278NED"] = partial(
+    transform_generic_feature_table, lag_years=1,  # ← was missing
+    filters={"Geslacht": "T001038", "Persoonskenmerken": "T009002", "PositieInDeWerkkring_CategoryGroupID": ["9", "10", "12"]},
+)
+TRANSFORMATION_REGISTRY["85916NED"] = partial(
+    transform_generic_feature_table, filters={"Geslacht": "T001038"}
+)
+TRANSFORMATION_REGISTRY["85917NED"] = partial(
+    transform_generic_feature_table,
+    exclude_metrics=["Mannen_", "Vrouwen_"]  
+)
+
+
 
 if __name__ == "__main__":
     db = DatabaseGold(DIR_DB_SILVER, DIR_DB_GOLD)
