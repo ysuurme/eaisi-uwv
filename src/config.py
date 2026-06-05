@@ -42,7 +42,7 @@ CBS_TABLE_REGISTRY: dict[str, dict] = {
         "description": "Ziekteverzuimpercentage; bedrijfstakken (SBI 2008)",
     },
 
-    # ── Labor Volume  ─────────────────────────────────────
+    # ── Labor Volume (LV) — quarterly ─────────────────────────────────────
     "85920NED": {
         "category": "labor_volume",
         "frequency": "quarterly",
@@ -51,21 +51,28 @@ CBS_TABLE_REGISTRY: dict[str, dict] = {
     "85916NED": {
         "category": "labor_volume",
         "frequency": "quarterly",
-        "description": "Beloning en arbeidsvolume van werknemers; kwartalen, nationale rekeningen",
+        "description": "Arbeidsvolume; kwartalen, geslacht, nationale rekeningen",
     },
 
-    # ── Working Conditions (WC)  ──────────────────────────────────
+    # ── Wages & Compensation (WG) ─────────────────────────────────────────
+    "85917NED": {
+        "category": "wages",
+        "frequency": "quarterly",
+        "description": "Beloning en arbeidsvolume van werknemers; kwartalen",
+    },
+    "81433ned": {
+        "category": "wages",
+        "frequency": "yearly",
+        "lag": 1,
+        "description": "Lonen en loonkosten; bedrijfstakken, nationale rekeningen",
+    },
+
+    # ── Working Conditions (WC) — yearly ──────────────────────────────────
     "86009NED": {
         "category": "working_conditions",
         "frequency": "yearly",
         "lag": 1,
         "description": "Sick leave by industry and branch size (cause of absence)",
-    },
-    "85917NED": {
-         "category": "working_conditions",
-         "frequency": "quarterly",
-         "lag": 1,
-         "description": "Werkgelegenheid; geslacht, dienstverband, kenmerken baan, SBI2008",
     },
 
     # ── Wellbeing (WB) — yearly ───────────────────────────────────────────
@@ -76,22 +83,17 @@ CBS_TABLE_REGISTRY: dict[str, dict] = {
         "description": "Welzijn; kerncijfers, persoonskenmerken",
     },
 
-    # ── Labor Structure (LS) — quarterly + yearly ─────────────────────────
+    # ── Labor Structure (LS) ──────────────────────────────────────────────
     "85278NED": {
-         "category": "labor_structure",
-         "frequency": "quarterly",
-         "description": "Werkzame beroepsbevolking; positie in de werkkring (fixed vs flex)",
+        "category": "labor_structure",
+        "frequency": "yearly",
+        "lag": 1,
+        "description": "Werkzame beroepsbevolking; positie in de werkkring (fixed vs flex)",
     },
     "80590ned": {
-         "category": "labor_structure",
-         "frequency": "quarterly",
-         "description": "Arbeidsdeelname en werkloosheid per maand",
-    },
-    "81433ned": {
-         "category": "labor_structure",
-         "frequency": "yearly",
-         "lag": 1,
-         "description": "Werkgelegenheid; geslacht, dienstverband, kenmerken baan, SBI2008",
+        "category": "labor_structure",
+        "frequency": "quarterly",
+        "description": "Arbeidsdeelname en werkloosheid per maand",
     },
 
     # ── Socio-Economic (SE) — yearly ──────────────────────────────────────
@@ -121,11 +123,10 @@ CBS_TABLE_REGISTRY: dict[str, dict] = {
 
 CBS_PRESETS: dict[str, list[str]] = {
     "basic":              ["labor_volume"],
-    "basic_conditions":   ["labor_volume", "working_conditions"],
-    "basic_wellbeing":    ["labor_volume", "working_conditions", "wellbeing"],
-    "basic_labor_struct": ["labor_volume", "working_conditions", "wellbeing", "labor_structure"],
-    "basic_socio":        ["labor_volume", "working_conditions", "wellbeing", "labor_structure", "socioeconomic"],
-    "all":                ["labor_volume", "working_conditions", "wellbeing", "labor_structure", "socioeconomic", "health"],
+    "basic_wages":        ["labor_volume", "wages"],
+    "basic_conditions":   ["labor_volume", "wages", "working_conditions"],
+    "basic_wellbeing":    ["labor_volume", "wages", "working_conditions", "wellbeing"],
+    "all":                ["labor_volume", "wages", "working_conditions", "wellbeing", "labor_structure"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
