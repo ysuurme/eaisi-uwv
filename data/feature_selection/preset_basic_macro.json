@@ -1,0 +1,168 @@
+{
+  "preset": "basic_macro",
+  "description": "Preset 'basic_macro': categories ['labor_volume', 'wages', 'socioeconomic']",
+  "timestamp": "2026-06-07T10:01:20.318629+00:00",
+  "input_shape": [
+    3549,
+    111
+  ],
+  "n_survivors": 11,
+  "surviving_features": [
+    "EconomischeSituatieLaatste12Maanden_4",
+    "GunstigeTijdVoorGroteAankopen_8",
+    "FinancieleSituatieKomende12Maanden_7",
+    "FinancieleSituatieLaatste12Maanden_6",
+    "Banen_8_T001413",
+    "GewerkteUren_26",
+    "GewerkteUren_24",
+    "BeloningPerGewerktUur_14",
+    "BeloningPerArbeidsjaar_17",
+    "LoonkostenPerArbeidsjaar_19",
+    "BeloningPerGewerktUur_20"
+  ],
+  "ungrouped_survivors": [],
+  "filter_chain": [
+    {
+      "filter": "near_constant",
+      "params": {
+        "max_fraction": 0.95
+      },
+      "n_input": 111,
+      "n_retained": 111,
+      "n_dropped": 0
+    },
+    {
+      "filter": "correlation",
+      "params": {
+        "threshold": 0.21,
+        "method": "within_sector_differenced",
+        "sector_col": "sector"
+      },
+      "n_input": 111,
+      "n_retained": 30,
+      "n_dropped": 81
+    },
+    {
+      "filter": "lagged_correlation",
+      "params": {
+        "threshold": 0.12,
+        "horizons": [
+          1,
+          2,
+          3
+        ],
+        "sector_col": "sector"
+      },
+      "n_input": 111,
+      "n_retained": 111,
+      "n_dropped": 0
+    },
+    {
+      "filter": "granger",
+      "params": {
+        "max_lag": 4,
+        "p_threshold": 0.05,
+        "min_sector_fraction": 0.2,
+        "sector_col": "sector",
+        "difference": true
+      },
+      "n_input": 111,
+      "n_retained": 79,
+      "n_dropped": 32
+    },
+    {
+      "filter": "lasso_stability",
+      "params": {
+        "n_bootstraps": 100,
+        "threshold": 0.6,
+        "random_state": 42,
+        "horizons": [
+          1,
+          2,
+          3
+        ],
+        "sector_col": "sector"
+      },
+      "n_input": 111,
+      "n_retained": 35,
+      "n_dropped": 76
+    },
+    {
+      "filter": "redundancy",
+      "params": {
+        "threshold": 0.9,
+        "sector_col": "sector"
+      },
+      "n_input": 47,
+      "n_retained": 23,
+      "n_dropped": 24
+    }
+  ],
+  "feature_groups": {
+    "BeloningPerArbeidsjaar": {
+      "columns": [
+        "BeloningPerArbeidsjaar_17"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: BeloningPerArbeidsjaar (1 features, source unknown)."
+    },
+    "BeloningPerGewerktUur": {
+      "columns": [
+        "BeloningPerGewerktUur_14",
+        "BeloningPerGewerktUur_20"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: BeloningPerGewerktUur (2 features, source unknown)."
+    },
+    "EconomischeSituatieLaatste12Maanden": {
+      "columns": [
+        "EconomischeSituatieLaatste12Maanden_4"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: EconomischeSituatieLaatste12Maanden (1 features, source unknown)."
+    },
+    "FinancieleSituatieKomende12Maanden": {
+      "columns": [
+        "FinancieleSituatieKomende12Maanden_7"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: FinancieleSituatieKomende12Maanden (1 features, source unknown)."
+    },
+    "FinancieleSituatieLaatste12Maanden": {
+      "columns": [
+        "FinancieleSituatieLaatste12Maanden_6"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: FinancieleSituatieLaatste12Maanden (1 features, source unknown)."
+    },
+    "GunstigeTijdVoorGroteAankopen": {
+      "columns": [
+        "GunstigeTijdVoorGroteAankopen_8"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: GunstigeTijdVoorGroteAankopen (1 features, source unknown)."
+    },
+    "LoonkostenPerArbeidsjaar": {
+      "columns": [
+        "LoonkostenPerArbeidsjaar_19"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: LoonkostenPerArbeidsjaar (1 features, source unknown)."
+    },
+    "labor_volume": {
+      "columns": [
+        "GewerkteUren_24",
+        "GewerkteUren_26"
+      ],
+      "source_table": "85920NED",
+      "description": "CBS metrics: GewerkteUren (2 features, 85920NED)."
+    },
+    "workforce": {
+      "columns": [
+        "Banen_8_T001413"
+      ],
+      "source_table": "85920NED",
+      "description": "CBS metrics: Banen (1 features, 85920NED)."
+    }
+  }
+}

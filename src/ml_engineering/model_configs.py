@@ -21,6 +21,7 @@ Feature catalog loading
    a manually defined dict.  This ensures the pipeline runs even before any
    feature selection has been performed.
 """
+import copy
 import json
 import logging
 import numpy as np
@@ -30,15 +31,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator, RegressorMixin, clone
+from sklearn.cross_decomposition import PLSRegression
 from sklearn.ensemble import (
     GradientBoostingRegressor,
     HistGradientBoostingRegressor,
     RandomForestRegressor,
 )
 from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sktime.forecasting.compose import make_reduction
-from sqlalchemy import String, Float, LargeBinary, DateTime
+from sqlalchemy import String, Float, Integer, LargeBinary, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -82,7 +86,7 @@ class ModelEvaluationRecord(Base):
     r2: Mapped[Optional[float]] = mapped_column(Float)
     mae: Mapped[Optional[float]] = mapped_column(Float)
     rmse: Mapped[Optional[float]] = mapped_column(Float)
-    passed_gate: Mapped[Optional[int]] = mapped_column(Float)
+    passed_gate: Mapped[Optional[int]] = mapped_column(Integer)
     model_blob: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
@@ -169,18 +173,61 @@ class SectorQuarterRollingMean(BaseEstimator, RegressorMixin):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """
-        Predicts using the learned rolling mean lookup.
-        Falls back to global training mean for unseen key combinations.
+        Predicts using the learned rolling mean lookup via a vectorised
+        left-merge against a DataFrame-form of self._lookup.  Unseen key
+        combinations fall back to the global training mean.
         """
         has_sbi = getattr(self, "_has_sbi", self.sbi_col in X.columns)
-        preds = []
-        for _, row in X.iterrows():
-            if has_sbi:
-                key = (row.get(self.sbi_col), int(row.get(self.quarter_col, 0)))
-            else:
-                key = (int(row.get(self.quarter_col, 0)),)
-            preds.append(self._lookup.get(key, self._global_mean))
-        return np.array(preds)
+
+        # Edge case: empty lookup → everything falls back to global mean.
+        if not self._lookup:
+            return np.full(len(X), self._global_mean, dtype=float)
+
+        # Build query keys frame in row-order of X (merge preserves left order).
+        if has_sbi:
+            keys = pd.DataFrame({
+                self.sbi_col: X[self.sbi_col].values,
+                self.quarter_col: X[self.quarter_col].astype(int).values,
+            })
+            lookup_df = pd.DataFrame(
+                [(k[0], k[1], v) for k, v in self._lookup.items()],
+                columns=[self.sbi_col, self.quarter_col, "_pred"],
+            )
+            on = [self.sbi_col, self.quarter_col]
+        else:
+            keys = pd.DataFrame({
+                self.quarter_col: X[self.quarter_col].astype(int).values,
+            })
+            lookup_df = pd.DataFrame(
+                [(k[0], v) for k, v in self._lookup.items()],
+                columns=[self.quarter_col, "_pred"],
+            )
+            on = [self.quarter_col]
+
+        merged = keys.merge(lookup_df, on=on, how="left")
+        return merged["_pred"].fillna(self._global_mean).to_numpy(dtype=float)
+
+
+class PLS1D(PLSRegression):
+    """``PLSRegression`` that returns 1-D predictions for single-target y.
+
+    sklearn's PLSRegression.predict returns shape (n_samples, n_targets), so
+    for our 1-D quarterly sick-leave target it returns (n_samples, 1).  The
+    sktime reducer wraps the inner regressor and expects 1-D output from
+    ``predict``; passing a 2-D array breaks downstream metric computations
+    and concatenation in walk-forward CV.
+
+    This thin subclass squeezes the trailing singleton dimension when
+    present.  It inherits everything else — ``fit``, params, ``set_params`` —
+    so it composes correctly inside ``Pipeline`` and ``make_reduction``,
+    and ``sklearn.base.clone`` works without changes.
+    """
+
+    def predict(self, X, copy=True):
+        y_pred = super().predict(X, copy=copy)
+        if y_pred.ndim > 1 and y_pred.shape[1] == 1:
+            return y_pred.ravel()
+        return y_pred
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +301,17 @@ def load_feature_catalog(preset_path: Path) -> Dict[str, FeatureGroup]:
             ),
         )
 
+    # Diagnostic group: empty columns list.  Combined with ml_1's
+    # _KEEP_STRUCTURAL injection (period_enddate, year, quarter, trend_index,
+    # covid_period, post_covid), this resolves to "structural features only" —
+    # the feature set used by the structural_linear diagnostic model.
+    catalog["structural_only"] = FeatureGroup(
+        name="structural_only",
+        columns=[],
+        source_table="",
+        description="Empty group; resolves to structural features only via ml_1 injection.",
+    )
+
     return catalog
 
 
@@ -305,6 +363,27 @@ _HARDCODED_CATALOG: Dict[str, FeatureGroup] = {
         description="Number of jobs and employed persons, seasonally adjusted, by sector and category (85920NED).",
     ),
 }
+
+# Meta-groups derived from the hardcoded named groups.  Added post-hoc because
+# FeatureGroup is frozen and cannot reference sibling entries during dict
+# construction.  Ensures the fallback path supports the same group names
+# (all_survivors, structural_only) as a preset-loaded catalog — otherwise
+# models referencing those groups would crash if the preset file is missing.
+_HARDCODED_CATALOG["all_survivors"] = FeatureGroup(
+    name="all_survivors",
+    columns=(
+        _HARDCODED_CATALOG["labor_volume"].columns
+        + _HARDCODED_CATALOG["workforce"].columns
+    ),
+    source_table="",
+    description="Hardcoded fallback: union of all named groups (labor_volume + workforce).",
+)
+_HARDCODED_CATALOG["structural_only"] = FeatureGroup(
+    name="structural_only",
+    columns=[],
+    source_table="",
+    description="Empty group; resolves to structural features only via ml_1 injection.",
+)
 
 # Try loading from preset; fall back to hardcoded if the file doesn't exist
 # or is malformed.  A bad preset file must never crash the pipeline at import.
@@ -360,8 +439,15 @@ class ModelConfiguration:
 
     Reducers (sktime make_reduction):
         Wraps sklearn regressors into recursive lag-window forecasters.
-        param_grid uses 'estimator__' prefix for underlying model params.
-        'window_length' is tunable to find the optimal lag window.
+        For linear-family models (linear / ridge / elasticnet / structural_linear)
+        the underlying regressor is wrapped in a sklearn Pipeline with a
+        StandardScaler step.  This adds an extra nesting level to param_grid
+        keys:  estimator__regressor__<param>  rather than  estimator__<param>.
+        Scaling is critical for L1/L2-penalised models on CBS data because raw
+        labour-volume features (hours, persons) dwarf scaled features in
+        magnitude and would otherwise hijack the regularisation budget.
+        Tree-family models (random_forest / hist_gbr) are scale-invariant and
+        are NOT wrapped in a scaler.
     """
 
     _CATALOG: Dict[str, ModelExperiment] = {
@@ -372,12 +458,28 @@ class ModelConfiguration:
             feature_groups=None,  # uses sbi_col + quarter_col from X; no catalog groups needed
             description="Rolling 3-year same-quarter mean per SBI sector. No look-ahead bias.",
         ),
+        "structural_linear": ModelExperiment(
+            name="StructuralLinear",
+            estimator=make_reduction(
+                Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
+                window_length=4, strategy="recursive",
+            ),
+            param_grid={
+                "window_length": [4, 8],
+                "estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+            feature_groups=["structural_only"],
+            description="Diagnostic floor: Ridge on structural features only (trend, regime flags, temporal).",
+        ),
         "linear": ModelExperiment(
             name="LinearRegression_Reduced",
-            estimator=make_reduction(LinearRegression(), window_length=12, strategy="recursive"),
-            param_grid={"window_length": [4, 8, 12]},
+            estimator=make_reduction(
+                Pipeline([("scaler", StandardScaler()), ("regressor", LinearRegression())]),
+                window_length=4, strategy="recursive",
+            ),
+            param_grid={"window_length": [4, 8]},
             feature_groups=["labor_volume"],
-            description="LinearRegression via make_reduction recursive lag-window forecaster.",
+            description="LinearRegression in scaler pipeline via make_reduction recursive lag-window forecaster.",
         ),
         "random_forest": ModelExperiment(
             name="RandomForest_Reduced",
@@ -388,9 +490,10 @@ class ModelConfiguration:
                 "window_length": [4, 8],
                 "estimator__n_estimators": [100, 200],
                 "estimator__max_depth": [5, 10, None],
+                "estimator__min_samples_leaf": [5, 10],
             },
             feature_groups=["labor_volume", "workforce"],
-            description="RandomForest via make_reduction (recursive). 12 combos x CV folds.",
+            description="RandomForest via make_reduction (recursive). min_samples_leaf regularises small-N fits.",
         ),
         "gradient_boosting": ModelExperiment(
             name="GradientBoosting_Reduced",
@@ -405,41 +508,35 @@ class ModelConfiguration:
             feature_groups=["labor_volume", "workforce"],
             description="GradientBoosting via make_reduction (recursive).",
         ),
-        "hist_gradient_boosting": ModelExperiment(
-            name="HistGradientBoosting_Reduced",
+        "ridge": ModelExperiment(
+            name="Ridge_Reduced",
             estimator=make_reduction(
-                HistGradientBoostingRegressor(random_state=42), window_length=12, strategy="recursive"
+                Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
+                window_length=4, strategy="recursive",
             ),
             param_grid={
                 "window_length": [4, 8],
-                "estimator__learning_rate": [0.05, 0.1],
-                "estimator__max_iter": [100, 300],
-            },
-            feature_groups=["labor_volume", "workforce"],
-            description="HistGradientBoosting via make_reduction (recursive).",
-        ),
-        "ridge": ModelExperiment(
-            name="Ridge_Reduced",
-            estimator=make_reduction(Ridge(), window_length=12, strategy="recursive"),
-            param_grid={
-                "window_length": [4, 8],
-                "estimator__alpha": [0.1, 1.0, 10.0, 100.0, 1000.0],
+                "estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0, 1000.0],
             },
             feature_groups=["all_survivors"],
-            description="Ridge via make_reduction. L2 regularization.",
+            description="Ridge in scaler pipeline via make_reduction. L2 regularization.",
         ),
         "elasticnet": ModelExperiment(
             name="ElasticNet_Reduced",
             estimator=make_reduction(
-                ElasticNet(max_iter=10_000), window_length=12, strategy="recursive"
+                Pipeline([
+                    ("scaler", StandardScaler()),
+                    ("regressor", ElasticNet(max_iter=10_000)),
+                ]),
+                window_length=4, strategy="recursive",
             ),
             param_grid={
                 "window_length": [4, 8],
-                "estimator__alpha": [0.01, 0.1, 1.0, 10.0],
-                "estimator__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9],
+                "estimator__regressor__alpha": [0.01, 0.1, 1.0, 10.0],
+                "estimator__regressor__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9],
             },
             feature_groups=["all_survivors"],
-            description="ElasticNet via make_reduction. L1+L2 regularization.",
+            description="ElasticNet in scaler pipeline via make_reduction. L1+L2 regularization.",
         ),
         "hist_gbr": ModelExperiment(
             name="HistGBR_Reduced",
@@ -457,6 +554,37 @@ class ModelConfiguration:
             feature_groups=["all_survivors"],
             description="HistGradientBoosting via make_reduction. Non-linear. Preset-driven.",
         ),
+        "pls": ModelExperiment(
+            name="PLS_Reduced",
+            estimator=make_reduction(
+                Pipeline([
+                    ("scaler", StandardScaler()),
+                    # scale=False because StandardScaler already handles scaling;
+                    # PLS1D fixes sklearn's 2-D predict-output quirk so this
+                    # composes correctly inside the sktime reducer.
+                    ("regressor", PLS1D(n_components=10, scale=False, max_iter=1_000)),
+                ]),
+                window_length=4, strategy="recursive",
+            ),
+            param_grid={
+                "window_length": [4, 8],
+                # n_components is the dimensionality-reduction knob: how many
+                # supervised components PLS extracts.  Cap at 20 because
+                # n_samples (~70 after lag burn-in) and the feature count
+                # bound PLS's rank — values much above 20 add noise.
+                "estimator__regressor__n_components": [2, 5, 10, 20],
+            },
+            feature_groups=["all_survivors"],
+            description=(
+                "Partial Least Squares regression in scaler pipeline. "
+                "Supervised dimensionality reduction — components chosen "
+                "to maximise covariance with y, not variance in X.  Often "
+                "outperforms Ridge in p>>n regimes."
+            ),
+        ),
+        # Removed: "hist_gradient_boosting" was a near-duplicate of "hist_gbr" and
+        # was never referenced by run_overnight.MODELS.  Single source of truth.
+        #
         # Prophet removed: unsuitable for quarterly 4Q-ahead forecasting.
         # Reasons: (1) designed for high-frequency data (daily/weekly), not 4 obs/year;
         # (2) 400 regressors on ~100 training rows causes extreme overfitting (R² ≈ -2300);
@@ -467,18 +595,37 @@ class ModelConfiguration:
 
     @classmethod
     def get(cls, key: str) -> ModelExperiment:
-        """Retrieves an experiment by its catalog key."""
+        """Retrieves an experiment by its catalog key, returning an isolated copy.
+
+        Isolation prevents state pollution across the (sector × preset × model)
+        sweep loop:
+        - estimator is sklearn.base.clone()'d → unfitted, no leaked fitted state
+        - param_grid is deepcopy()'d → mutations don't propagate across loops
+        - feature_groups is a fresh list → independent of catalog entry's list
+        """
         if key not in cls._CATALOG:
             available = ", ".join(cls._CATALOG.keys())
             raise ValueError(f"Experiment '{key}' not found. Available: {available}")
-        return cls._CATALOG[key]
+        src = cls._CATALOG[key]
+        return ModelExperiment(
+            name=src.name,
+            estimator=clone(src.estimator),
+            param_grid=copy.deepcopy(src.param_grid),
+            # Preserve None vs [] distinction (ml_1 treats them differently):
+            #   None  → discovery mode (all non-structural columns)
+            #   []    → groups mode with zero groups (structural-only via injection)
+            feature_groups=(
+                list(src.feature_groups) if src.feature_groups is not None else None
+            ),
+            description=src.description,
+        )
 
     @classmethod
     def get_all(cls) -> List[ModelExperiment]:
-        """Returns all registered experiments."""
-        return list(cls._CATALOG.values())
+        """Returns all registered experiments (each as an isolated copy)."""
+        return [cls.get(key) for key in cls._CATALOG.keys()]
 
     @classmethod
     def get_tuning_suite(cls) -> List[ModelExperiment]:
-        """Returns only models that have a non-empty param_grid."""
-        return [exp for exp in cls._CATALOG.values() if exp.param_grid]
+        """Returns only models that have a non-empty param_grid (isolated copies)."""
+        return [cls.get(key) for key, exp in cls._CATALOG.items() if exp.param_grid]

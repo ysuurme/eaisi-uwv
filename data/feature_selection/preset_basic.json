@@ -1,19 +1,14 @@
 {
   "preset": "basic",
   "description": "Preset 'basic': categories ['labor_volume']",
-  "timestamp": "2026-06-04T18:39:11.610392+00:00",
+  "timestamp": "2026-06-07T10:01:20.306484+00:00",
   "input_shape": [
     3549,
-    212
+    111
   ],
-  "n_survivors": 6,
+  "n_survivors": 1,
   "surviving_features": [
-    "WerkzamePersonen_1_A045285_T001038",
-    "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
-    "GewerkteUren_3_A045285_T001038",
-    "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
-    "GewerkteUrenPerBaan_10_A045286_T001038",
-    "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038"
+    "Banen_8_T001413"
   ],
   "ungrouped_survivors": [],
   "filter_chain": [
@@ -22,21 +17,9 @@
       "params": {
         "max_fraction": 0.95
       },
-      "n_input": 212,
-      "n_retained": 212,
+      "n_input": 111,
+      "n_retained": 111,
       "n_dropped": 0
-    },
-    {
-      "filter": "yearly_evaluation",
-      "params": {
-        "corr_threshold": 0.4,
-        "lag_threshold": 0.4,
-        "year_col": "year",
-        "sector_col": "sector"
-      },
-      "n_input": 98,
-      "n_retained": 38,
-      "n_dropped": 60
     },
     {
       "filter": "correlation",
@@ -45,9 +28,9 @@
         "method": "within_sector_differenced",
         "sector_col": "sector"
       },
-      "n_input": 114,
-      "n_retained": 34,
-      "n_dropped": 80
+      "n_input": 111,
+      "n_retained": 30,
+      "n_dropped": 81
     },
     {
       "filter": "lagged_correlation",
@@ -60,9 +43,9 @@
         ],
         "sector_col": "sector"
       },
-      "n_input": 114,
+      "n_input": 111,
       "n_retained": 111,
-      "n_dropped": 3
+      "n_dropped": 0
     },
     {
       "filter": "granger",
@@ -73,9 +56,9 @@
         "sector_col": "sector",
         "difference": true
       },
-      "n_input": 114,
-      "n_retained": 83,
-      "n_dropped": 31
+      "n_input": 111,
+      "n_retained": 79,
+      "n_dropped": 32
     },
     {
       "filter": "lasso_stability",
@@ -90,9 +73,9 @@
         ],
         "sector_col": "sector"
       },
-      "n_input": 114,
-      "n_retained": 43,
-      "n_dropped": 71
+      "n_input": 111,
+      "n_retained": 35,
+      "n_dropped": 76
     },
     {
       "filter": "redundancy",
@@ -100,29 +83,18 @@
         "threshold": 0.9,
         "sector_col": "sector"
       },
-      "n_input": 93,
-      "n_retained": 46,
-      "n_dropped": 47
+      "n_input": 47,
+      "n_retained": 23,
+      "n_dropped": 24
     }
   ],
   "feature_groups": {
-    "labor_volume": {
-      "columns": [
-        "GewerkteUrenPerBaan_10_A045286_T001038",
-        "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
-        "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038",
-        "GewerkteUren_3_A045285_T001038"
-      ],
-      "source_table": "85920NED",
-      "description": "CBS metrics: GewerkteUren, GewerkteUrenPerBaan, GewerkteUrenPerWerkzamePersoon (4 features, 85920NED)."
-    },
     "workforce": {
       "columns": [
-        "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
-        "WerkzamePersonen_1_A045285_T001038"
+        "Banen_8_T001413"
       ],
       "source_table": "85920NED",
-      "description": "CBS metrics: WerkzamePersonen, WerkzamePersonenSeizoengecorrigeerd (2 features, 85920NED)."
+      "description": "CBS metrics: Banen (1 features, 85920NED)."
     }
   }
 }

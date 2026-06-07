@@ -1,32 +1,20 @@
 {
   "preset": "basic_conditions",
-  "description": "Preset 'basic_conditions': categories ['labor_volume', 'working_conditions']",
-  "timestamp": "2026-06-04T18:39:11.616394+00:00",
+  "description": "Preset 'basic_conditions': categories ['labor_volume', 'wages', 'working_conditions']",
+  "timestamp": "2026-06-07T10:01:20.314500+00:00",
   "input_shape": [
     3549,
-    212
+    111
   ],
-  "n_survivors": 19,
+  "n_survivors": 7,
   "surviving_features": [
-    "BeloningPerGewerktUur_14",
-    "y_PsychischOverspannenheidBurnOut_13_MW00000",
-    "y_BuikMaagOfDarmen_17_MW00000",
-    "y_Huid_18_MW00000",
-    "y_HeupBenenKnieenVoeten_11_MW00000",
-    "y_LangdurigDezelfdeHandelingOfPcWerk_48_MW00000",
-    "y_ProblemenMetKlanten_52_MW00000",
-    "WerkzamePersonen_1_A045285_T001038",
-    "BeloningPerArbeidsjaar_17",
-    "LonenPerArbeidsjaar_18",
-    "LoonkostenPerArbeidsjaar_19",
-    "BeloningPerGewerktUur_20",
-    "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
+    "Banen_8_T001413",
+    "GewerkteUren_26",
     "GewerkteUren_24",
-    "GewerkteUren_3_A045285_T001038",
-    "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
-    "Totaal_30",
-    "GewerkteUrenPerBaan_10_A045286_T001038",
-    "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038"
+    "BeloningPerGewerktUur_14",
+    "BeloningPerArbeidsjaar_17",
+    "LoonkostenPerArbeidsjaar_19",
+    "BeloningPerGewerktUur_20"
   ],
   "ungrouped_survivors": [],
   "filter_chain": [
@@ -35,21 +23,9 @@
       "params": {
         "max_fraction": 0.95
       },
-      "n_input": 212,
-      "n_retained": 212,
+      "n_input": 111,
+      "n_retained": 111,
       "n_dropped": 0
-    },
-    {
-      "filter": "yearly_evaluation",
-      "params": {
-        "corr_threshold": 0.4,
-        "lag_threshold": 0.4,
-        "year_col": "year",
-        "sector_col": "sector"
-      },
-      "n_input": 98,
-      "n_retained": 38,
-      "n_dropped": 60
     },
     {
       "filter": "correlation",
@@ -58,9 +34,9 @@
         "method": "within_sector_differenced",
         "sector_col": "sector"
       },
-      "n_input": 114,
-      "n_retained": 34,
-      "n_dropped": 80
+      "n_input": 111,
+      "n_retained": 30,
+      "n_dropped": 81
     },
     {
       "filter": "lagged_correlation",
@@ -73,9 +49,9 @@
         ],
         "sector_col": "sector"
       },
-      "n_input": 114,
+      "n_input": 111,
       "n_retained": 111,
-      "n_dropped": 3
+      "n_dropped": 0
     },
     {
       "filter": "granger",
@@ -86,9 +62,9 @@
         "sector_col": "sector",
         "difference": true
       },
-      "n_input": 114,
-      "n_retained": 83,
-      "n_dropped": 31
+      "n_input": 111,
+      "n_retained": 79,
+      "n_dropped": 32
     },
     {
       "filter": "lasso_stability",
@@ -103,9 +79,9 @@
         ],
         "sector_col": "sector"
       },
-      "n_input": 114,
-      "n_retained": 43,
-      "n_dropped": 71
+      "n_input": 111,
+      "n_retained": 35,
+      "n_dropped": 76
     },
     {
       "filter": "redundancy",
@@ -113,9 +89,9 @@
         "threshold": 0.9,
         "sector_col": "sector"
       },
-      "n_input": 93,
-      "n_retained": 46,
-      "n_dropped": 47
+      "n_input": 47,
+      "n_retained": 23,
+      "n_dropped": 24
     }
   ],
   "feature_groups": {
@@ -134,13 +110,6 @@
       "source_table": "",
       "description": "CBS metrics: BeloningPerGewerktUur (2 features, source unknown)."
     },
-    "LonenPerArbeidsjaar": {
-      "columns": [
-        "LonenPerArbeidsjaar_18"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: LonenPerArbeidsjaar (1 features, source unknown)."
-    },
     "LoonkostenPerArbeidsjaar": {
       "columns": [
         "LoonkostenPerArbeidsjaar_19"
@@ -148,73 +117,20 @@
       "source_table": "",
       "description": "CBS metrics: LoonkostenPerArbeidsjaar (1 features, source unknown)."
     },
-    "Totaal": {
-      "columns": [
-        "Totaal_30"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: Totaal (1 features, source unknown)."
-    },
     "labor_volume": {
       "columns": [
-        "GewerkteUrenPerBaan_10_A045286_T001038",
-        "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
-        "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038",
         "GewerkteUren_24",
-        "GewerkteUren_3_A045285_T001038"
+        "GewerkteUren_26"
       ],
       "source_table": "85920NED",
-      "description": "CBS metrics: GewerkteUren, GewerkteUrenPerBaan, GewerkteUrenPerWerkzamePersoon (5 features, 85920NED)."
+      "description": "CBS metrics: GewerkteUren (2 features, 85920NED)."
     },
     "workforce": {
       "columns": [
-        "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
-        "WerkzamePersonen_1_A045285_T001038"
+        "Banen_8_T001413"
       ],
       "source_table": "85920NED",
-      "description": "CBS metrics: WerkzamePersonen, WerkzamePersonenSeizoengecorrigeerd (2 features, 85920NED)."
-    },
-    "y_BuikMaagOfDarmen": {
-      "columns": [
-        "y_BuikMaagOfDarmen_17_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_BuikMaagOfDarmen (1 features, source unknown)."
-    },
-    "y_HeupBenenKnieenVoeten": {
-      "columns": [
-        "y_HeupBenenKnieenVoeten_11_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_HeupBenenKnieenVoeten (1 features, source unknown)."
-    },
-    "y_Huid": {
-      "columns": [
-        "y_Huid_18_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_Huid (1 features, source unknown)."
-    },
-    "y_LangdurigDezelfdeHandelingOfPcWerk": {
-      "columns": [
-        "y_LangdurigDezelfdeHandelingOfPcWerk_48_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_LangdurigDezelfdeHandelingOfPcWerk (1 features, source unknown)."
-    },
-    "y_ProblemenMetKlanten": {
-      "columns": [
-        "y_ProblemenMetKlanten_52_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ProblemenMetKlanten (1 features, source unknown)."
-    },
-    "y_PsychischOverspannenheidBurnOut": {
-      "columns": [
-        "y_PsychischOverspannenheidBurnOut_13_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_PsychischOverspannenheidBurnOut (1 features, source unknown)."
+      "description": "CBS metrics: Banen (1 features, 85920NED)."
     }
   }
 }
