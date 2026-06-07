@@ -22,7 +22,7 @@ features).  Walk-forward across 5 × 4-point windows gives 20 evaluation
 points and a metric that reflects genuine out-of-sample generalisation.
 """
 import pickle
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import mlflow
 import numpy as np
@@ -99,7 +99,7 @@ class ModelEvaluator:
             r2=metrics["r2"],
             mae=metrics["mae"],
             rmse=metrics["rmse"],
-            passed_gate=0,  # Updated by Step 6 after quality gate validation
+            passed_gate=0,  # initial value; Step 6 (ModelValidator) overwrites after gate check
             model_blob=(
                 pickle.dumps(fitted_model)
                 if isinstance(fitted_model, SectorQuarterRollingMean)
@@ -129,6 +129,16 @@ def _walk_forward_metrics(
     n_test_points // _FH_STEPS expanding origins, refitting from scratch at
     each one.  All predictions are concatenated before computing aggregate
     metrics.
+
+    Per-origin metrics are also computed and binned by structural regime:
+        r2_pre2023  : origins whose training window ends on or before Q4 2022
+                      (i.e. the model has seen no post-COVID examples yet)
+        r2_post2023 : origins whose training window ends after Q4 2022
+                      (model has been exposed to post-COVID structural regime)
+
+    This surfaces the regime-learning arc that an aggregate R² conceals.
+    A run with weak r2_pre2023 but strong r2_post2023 is doing what we
+    want — picking up post-COVID dynamics once it has training data for them.
     """
     y_full = pd.concat([y_train, y_test])
     X_full = pd.concat([x_train, x_test])
@@ -136,8 +146,9 @@ def _walk_forward_metrics(
     initial_window = len(y_train)
     n_origins = n_test_points // _FH_STEPS
 
-    all_y_true: list = []
-    all_y_pred: list = []
+    # Per-origin storage enables both aggregate and regime-binned metrics
+    # without recomputing predictions.
+    per_origin: List[Dict[str, Any]] = []
 
     for i in range(n_origins):
         origin = initial_window + i * _STEP_LENGTH
@@ -153,27 +164,75 @@ def _walk_forward_metrics(
         X_tr  = X_full.iloc[:origin]
         X_fut = X_full.iloc[origin:origin + _FH_STEPS]
 
+        # Train cutoff = last date used for fitting at this origin.
+        # Pipeline guarantees a DatetimeIndex via ml_3.DataPreparator, but we
+        # guard against the non-datetime case (regime binning becomes a no-op).
+        train_cutoff_raw = y_full.index[origin - 1]
+        try:
+            train_cutoff = pd.Timestamp(train_cutoff_raw)
+        except (TypeError, ValueError):
+            train_cutoff = None
+
         estimator = clone(fitted_model)
         y_pred = _predict_origin(estimator, y_tr, X_tr, X_fut)
 
-        all_y_true.extend(y_fut.values.tolist())
-        all_y_pred.extend(np.asarray(y_pred).ravel().tolist())
+        per_origin.append({
+            "origin_idx": i,
+            "train_cutoff": train_cutoff,
+            "y_true": np.asarray(y_fut.values, dtype=float),
+            "y_pred": np.asarray(y_pred, dtype=float).ravel(),
+        })
 
-    y_true_arr = np.array(all_y_true)
-    y_pred_arr = np.array(all_y_pred)
+    if not per_origin:
+        raise RuntimeError("Walk-forward produced zero origins — check n_test_points and data length.")
+
+    # Aggregate across all origins
+    y_true_arr = np.concatenate([r["y_true"] for r in per_origin])
+    y_pred_arr = np.concatenate([r["y_pred"] for r in per_origin])
 
     r2   = float(r2_score(y_true_arr, y_pred_arr))
     mae  = float(mean_absolute_error(y_true_arr, y_pred_arr))
     rmse = float(np.sqrt(mean_squared_error(y_true_arr, y_pred_arr)))
 
+    # Regime binning — boundary is the last day of Q4 2022.
+    # An origin "belongs to pre2023" if its training window ended on or before
+    # 2022-12-31 (i.e. no post-COVID examples in training yet).
+    COVID_END = pd.Timestamp("2022-12-31")
+    pre_records  = [r for r in per_origin
+                    if r["train_cutoff"] is not None and r["train_cutoff"] <= COVID_END]
+    post_records = [r for r in per_origin
+                    if r["train_cutoff"] is not None and r["train_cutoff"] >  COVID_END]
+
+    def _bin_r2(records: List[Dict[str, Any]]) -> Optional[float]:
+        if not records:
+            return None
+        yt = np.concatenate([r["y_true"] for r in records])
+        yp = np.concatenate([r["y_pred"] for r in records])
+        return float(r2_score(yt, yp))
+
+    r2_pre  = _bin_r2(pre_records)
+    r2_post = _bin_r2(post_records)
+
     with mlflow.start_run(run_id=run_id):
-        mlflow.log_metrics({
-            "r2_score":               r2,
-            "mean_absolute_error":    mae,
+        metrics_to_log: Dict[str, float] = {
+            "r2_score":                r2,
+            "mean_absolute_error":     mae,
             "root_mean_squared_error": rmse,
-            "n_eval_origins":         len(all_y_true) // _FH_STEPS,
-            "n_eval_points":          len(all_y_true),
-        })
+            "n_eval_origins":          len(per_origin),
+            "n_eval_points":           int(y_true_arr.size),
+            "n_origins_pre2023":       len(pre_records),
+            "n_origins_post2023":      len(post_records),
+        }
+        if r2_pre  is not None: metrics_to_log["r2_pre2023"]  = r2_pre
+        if r2_post is not None: metrics_to_log["r2_post2023"] = r2_post
+        mlflow.log_metrics(metrics_to_log)
+
+        # Per-origin R² as a step-indexed metric — produces a time-series
+        # style chart in the MLflow UI showing the regime-learning arc.
+        for rec in per_origin:
+            if rec["y_true"].size >= 2:  # r2 undefined for <2 points
+                r2_i = float(r2_score(rec["y_true"], rec["y_pred"]))
+                mlflow.log_metric("r2_per_origin", r2_i, step=rec["origin_idx"])
 
     return {"r2": r2, "mae": mae, "rmse": rmse}
 

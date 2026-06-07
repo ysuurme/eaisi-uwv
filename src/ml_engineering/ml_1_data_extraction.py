@@ -50,10 +50,28 @@ _NATIONAL_TOTAL_COL = "BedrijfskenmerkenSBI2008_T001081"
 # OHE column prefix for all SBI sector indicators
 _OHE_PREFIX = "BedrijfskenmerkenSBI2008_"
 
-# Columns kept as structural context (date + temporal indices)
+# Columns kept as structural context (date + temporal indices + regime indicators).
 # Note: BedrijfstakkenBranchesSBI2008 does NOT exist in the gold feature store;
 # sector identity is encoded via OHE columns (BedrijfskenmerkenSBI2008_*).
-_KEEP_STRUCTURAL = {"period_enddate", "year", "quarter"}
+#
+# trend_index / covid_period / post_covid / covid_depth / recovery_quarters /
+# trend_x_post_covid / quarter_x_post_covid are theoretically motivated regime
+# indicators that must always reach the model regardless of preset filtering.
+# trend_index in particular is declared STRUCTURAL in feature_selection_utils.py
+# and is therefore never in any preset's surviving_features list — without this
+# injection it would never reach the model.
+#
+# The continuous (covid_depth, recovery_quarters) and interaction
+# (trend_x_post_covid, quarter_x_post_covid) features give linear models the
+# lever to fit regime-dependent slope and seasonality without expanding
+# parameter count uncontrollably.
+_KEEP_STRUCTURAL = {
+    "period_enddate", "year", "quarter",
+    "trend_index",
+    "covid_period", "post_covid",
+    "covid_depth", "recovery_quarters",
+    "trend_x_post_covid", "quarter_x_post_covid",
+}
 
 # Silently dropped — pipeline artefacts with no ML or context value
 _DROP_ALWAYS = {"silver_id"}
@@ -108,7 +126,13 @@ class DataExtractor:
             mode = "discovery"
 
         structural_present = [c for c in df.columns if c in _KEEP_STRUCTURAL]
-        columns_to_keep = structural_present + [target_column] + feature_columns
+        # Order-preserving dedup: a structural column may also appear in
+        # feature_columns if a preset's group lists it explicitly.  Without
+        # dedup, df[[col, col]] would return duplicate columns and break
+        # downstream numeric dtype assertions.
+        columns_to_keep = list(dict.fromkeys(
+            structural_present + [target_column] + feature_columns
+        ))
         df = df[[c for c in columns_to_keep if c in available_columns]]
 
         sbi_label = sbi_filter_col or "all-industry"

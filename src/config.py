@@ -36,6 +36,7 @@ DATA_START_YEAR = 2003
 
 CBS_TABLE_REGISTRY: dict[str, dict] = {
     # ── Target ────────────────────────────────────────────────────────────
+    # Ziekteverzuimpercentage; bedrijfstakken (SBI 2008) en bedrijfsgrootte: data available from 1996 > onwards
     "80072ned": {
         "category": "target",
         "frequency": "quarterly",
@@ -43,60 +44,68 @@ CBS_TABLE_REGISTRY: dict[str, dict] = {
     },
 
     # ── Labor Volume (LV) — quarterly ─────────────────────────────────────
+    # Arbeidsvolume; bedrijfstak, kwartalen, nationale rekeningen : data available from 1995 > onwards
     "85920NED": {
         "category": "labor_volume",
         "frequency": "quarterly",
         "description": "Arbeidsvolume; bedrijfstak, kwartalen, nationale rekeningen",
     },
-    "85916NED": {
-        "category": "labor_volume",
-        "frequency": "quarterly",
-        "description": "Arbeidsvolume; kwartalen, geslacht, nationale rekeningen",
-    },
 
     # ── Wages & Compensation (WG) ─────────────────────────────────────────
+    # Beloning en arbeidsvolume van werknemers; kwartalen, nationale rekeningen: data available from 1995 > onwards
     "85917NED": {
         "category": "wages",
         "frequency": "quarterly",
         "description": "Beloning en arbeidsvolume van werknemers; kwartalen",
     },
-    "81433ned": {
-        "category": "wages",
-        "frequency": "yearly",
-        "lag": 1,
-        "description": "Lonen en loonkosten; bedrijfstakken, nationale rekeningen",
-    },
 
-    # ── Working Conditions (WC) — yearly ──────────────────────────────────
-    "86009NED": {
-        "category": "working_conditions",
-        "frequency": "yearly",
-        "lag": 1,
-        "description": "Sick leave by industry and branch size (cause of absence)",
-    },
+    # # ── Working Conditions (WC)  ──────────────────────────────────
+    # # Ziekteverzuim volgens werknemers; bedrijfstak en vestigingsgrootte: data available from 2014 > onwards
+    # "86009NED": {
+    #     "category": "working_conditions",
+    #     "frequency": "yearly",
+    #     "lag": 1,
+    #     "description": "Sick leave by industry and branch size (cause of absence)",
+    # },
 
-    # ── Wellbeing (WB) — yearly ───────────────────────────────────────────
-    "85542NED": {
-        "category": "wellbeing",
-        "frequency": "yearly",
-        "lag": 1,
-        "description": "Welzijn; kerncijfers, persoonskenmerken",
-    },
+    # # ── Wellbeing (WB)  ────────────────────────────────────────────
+    # # Welzijn; kerncijfers, persoonskenmerken: data available from 2013 > onwards
+    # "85542NED": {
+    #     "category": "wellbeing",
+    #     "frequency": "yearly",
+    #     "lag": 1,
+    #     "description": "Welzijn; kerncijfers, persoonskenmerken",
+    # },
 
     # ── Labor Structure (LS) ──────────────────────────────────────────────
-    "85278NED": {
-        "category": "labor_structure",
-        "frequency": "yearly",
-        "lag": 1,
-        "description": "Werkzame beroepsbevolking; positie in de werkkring (fixed vs flex)",
-    },
+    # Werkzame beroepsbevolking; positie in de werkkring (fixed vs flex): data available from 2013 > onwards
+    #"85278NED": {
+    #    "category": "labor_structure",
+    #    "frequency": "quarterly",
+    #    "description": "Werkzame beroepsbevolking; positie in de werkkring (fixed vs flex)",
+    #},
+    # -- Arbeidsdeelname en werkloosheid per maand: data available from 2003 > onwards
     "80590ned": {
         "category": "labor_structure",
         "frequency": "quarterly",
         "description": "Arbeidsdeelname en werkloosheid per maand",
     },
-
-    # ── Socio-Economic (SE) — yearly ──────────────────────────────────────
+    # Vacatures; SBI 2008; naar economische activiteit en bedrijfsgrootte: data available from 1997 > onwards
+    "80472ned": {
+        "category": "labor_structure",
+        "frequency": "quarterly",
+        "description": "Arbeidsdeelname en werkloosheid per maand",
+    },
+    # ── Socio-Economic (SE) — monthly ─────────────────────────────────────
+    # Consumentenvertrouwen, economisch klimaat en koopbereidheid; gecorrigeerd, data available from 1986 > onwards.
+    # Aggregation: "mean" — CCI is a level/index variable, average over the 3 months in each quarter.
+    "83693NED": {
+         "category": "socioeconomic",
+         "frequency": "monthly",
+         "agg": "mean",
+         "description": "Consumentenvertrouwen",
+     },  
+    
     # "85266NED": {
     #     "category": "socioeconomic",
     #     "frequency": "yearly",
@@ -126,7 +135,9 @@ CBS_PRESETS: dict[str, list[str]] = {
     "basic_wages":        ["labor_volume", "wages"],
     "basic_conditions":   ["labor_volume", "wages", "working_conditions"],
     "basic_wellbeing":    ["labor_volume", "wages", "working_conditions", "wellbeing"],
-    "all":                ["labor_volume", "wages", "working_conditions", "wellbeing", "labor_structure"],
+    "basic_macro":        ["labor_volume", "wages", "socioeconomic"],
+    "all":                ["labor_volume", "wages", "working_conditions", "wellbeing",
+                           "labor_structure", "socioeconomic"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -144,6 +155,16 @@ CBS_TABLES_YEARLY: dict[str, int] = {
     tid: meta.get("lag", 1)
     for tid, meta in CBS_TABLE_REGISTRY.items()
     if meta["frequency"] == "yearly"
+}
+
+# All monthly feature tables with their quarterly aggregation method.
+# Default "mean" is appropriate for level/index/rate variables (CCI, CPI,
+# unemployment rate); override per-table with `"agg": "sum"` for flows
+# (new vacancies posted), or `"agg": "last"` for end-of-period stocks.
+CBS_TABLES_MONTHLY: dict[str, str] = {
+    tid: meta.get("agg", "mean")
+    for tid, meta in CBS_TABLE_REGISTRY.items()
+    if meta["frequency"] == "monthly"
 }
 
 # Target table ID

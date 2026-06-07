@@ -1,58 +1,35 @@
 {
   "preset": "all",
-  "description": "Preset 'all': categories ['labor_volume', 'working_conditions', 'wellbeing', 'labor_structure', 'socioeconomic', 'health']",
-  "timestamp": "2026-06-04T18:39:11.640387+00:00",
+  "description": "Preset 'all': categories ['labor_volume', 'wages', 'working_conditions', 'wellbeing', 'labor_structure', 'socioeconomic']",
+  "timestamp": "2026-06-07T10:01:20.321747+00:00",
   "input_shape": [
     3549,
-    212
+    111
   ],
-  "n_survivors": 46,
+  "n_survivors": 23,
   "surviving_features": [
+    "EconomischeSituatieLaatste12Maanden_4",
+    "GunstigeTijdVoorGroteAankopen_8",
+    "FinancieleSituatieKomende12Maanden_7",
+    "FinancieleSituatieLaatste12Maanden_6",
+    "Banen_8_T001413",
+    "GewerkteUren_26",
+    "GewerkteUren_24",
+    "NietSeizoengecorrigeerd_7_T001038_53825",
+    "NietSeizoengecorrigeerd_5_T001038_53825",
+    "NietSeizoengecorrigeerd_5_T001038_53310",
+    "Seizoengecorrigeerd_8_T001038_53050",
+    "VervuldeVacatures_3",
+    "NietSeizoengecorrigeerd_13_T001038_53050",
     "NietSeizoengecorrigeerd_11_T001038_53310",
     "BeloningPerGewerktUur_14",
     "NietSeizoengecorrigeerd_1_T001038_53050",
     "NietSeizoengecorrigeerd_11_T001038_53825",
-    "y_ScoreZorgenOverFinancieleToekomst_41_T009002_MW00000",
-    "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021398",
-    "y_ScoreTevredenheidMetWerk_13_T009002_MW00000",
-    "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021420",
-    "y_PsychischOverspannenheidBurnOut_13_MW00000",
-    "y_BuikMaagOfDarmen_17_MW00000",
-    "y_Huid_18_MW00000",
-    "y_HeupBenenKnieenVoeten_11_MW00000",
-    "y_LangdurigDezelfdeHandelingOfPcWerk_48_MW00000",
-    "y_ProblemenMetKlanten_52_MW00000",
-    "y_MaandloonInclusiefOverwerk_4_T001038_T001007_10000",
-    "WerkzamePersonen_1_A045285_T001038",
-    "NietSeizoengecorrigeerd_13_T001038_53050",
-    "y_ScoreTevredenheidMetWoning_45_T009002_MW00000",
-    "NietSeizoengecorrigeerd_9_T001038_53825",
-    "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021344",
-    "y_ScoreTevredenheidOpleidingskansen_9_T009002_MW00000",
-    "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021350",
-    "y_ScoreGeluk_1_T009002_MW00000",
-    "y_ScoreTevredenheidMetSociaalLeven_57_T009002_MW00000",
-    "y_PerBaanPerJaar_12_T001038_T001007_10000",
-    "y_PerArbeidsjaar_13_T001038_T001007_10000",
-    "NietSeizoengecorrigeerd_5_T001038_53310",
-    "Seizoengecorrigeerd_8_T001038_53050",
-    "NietSeizoengecorrigeerd_5_T001038_53825",
-    "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021320",
-    "NietSeizoengecorrigeerd_7_T001038_53825",
-    "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021342",
-    "NietSeizoengecorrigeerd_13_T001038_53310",
-    "NietSeizoengecorrigeerd_11_T001038_53050",
     "BeloningPerArbeidsjaar_17",
-    "LonenPerArbeidsjaar_18",
     "LoonkostenPerArbeidsjaar_19",
+    "NietSeizoengecorrigeerd_11_T001038_53050",
+    "NietSeizoengecorrigeerd_9_T001038_53825",
     "BeloningPerGewerktUur_20",
-    "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
-    "GewerkteUren_24",
-    "GewerkteUren_3_A045285_T001038",
-    "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
-    "Totaal_30",
-    "GewerkteUrenPerBaan_10_A045286_T001038",
-    "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038",
     "NietSeizoengecorrigeerd_1_T001038_53310"
   ],
   "ungrouped_survivors": [],
@@ -62,21 +39,9 @@
       "params": {
         "max_fraction": 0.95
       },
-      "n_input": 212,
-      "n_retained": 212,
+      "n_input": 111,
+      "n_retained": 111,
       "n_dropped": 0
-    },
-    {
-      "filter": "yearly_evaluation",
-      "params": {
-        "corr_threshold": 0.4,
-        "lag_threshold": 0.4,
-        "year_col": "year",
-        "sector_col": "sector"
-      },
-      "n_input": 98,
-      "n_retained": 38,
-      "n_dropped": 60
     },
     {
       "filter": "correlation",
@@ -85,9 +50,9 @@
         "method": "within_sector_differenced",
         "sector_col": "sector"
       },
-      "n_input": 114,
-      "n_retained": 34,
-      "n_dropped": 80
+      "n_input": 111,
+      "n_retained": 30,
+      "n_dropped": 81
     },
     {
       "filter": "lagged_correlation",
@@ -100,9 +65,9 @@
         ],
         "sector_col": "sector"
       },
-      "n_input": 114,
+      "n_input": 111,
       "n_retained": 111,
-      "n_dropped": 3
+      "n_dropped": 0
     },
     {
       "filter": "granger",
@@ -113,9 +78,9 @@
         "sector_col": "sector",
         "difference": true
       },
-      "n_input": 114,
-      "n_retained": 83,
-      "n_dropped": 31
+      "n_input": 111,
+      "n_retained": 79,
+      "n_dropped": 32
     },
     {
       "filter": "lasso_stability",
@@ -130,9 +95,9 @@
         ],
         "sector_col": "sector"
       },
-      "n_input": 114,
-      "n_retained": 43,
-      "n_dropped": 71
+      "n_input": 111,
+      "n_retained": 35,
+      "n_dropped": 76
     },
     {
       "filter": "redundancy",
@@ -140,9 +105,9 @@
         "threshold": 0.9,
         "sector_col": "sector"
       },
-      "n_input": 93,
-      "n_retained": 46,
-      "n_dropped": 47
+      "n_input": 47,
+      "n_retained": 23,
+      "n_dropped": 24
     }
   ],
   "feature_groups": {
@@ -161,12 +126,33 @@
       "source_table": "",
       "description": "CBS metrics: BeloningPerGewerktUur (2 features, source unknown)."
     },
-    "LonenPerArbeidsjaar": {
+    "EconomischeSituatieLaatste12Maanden": {
       "columns": [
-        "LonenPerArbeidsjaar_18"
+        "EconomischeSituatieLaatste12Maanden_4"
       ],
       "source_table": "",
-      "description": "CBS metrics: LonenPerArbeidsjaar (1 features, source unknown)."
+      "description": "CBS metrics: EconomischeSituatieLaatste12Maanden (1 features, source unknown)."
+    },
+    "FinancieleSituatieKomende12Maanden": {
+      "columns": [
+        "FinancieleSituatieKomende12Maanden_7"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: FinancieleSituatieKomende12Maanden (1 features, source unknown)."
+    },
+    "FinancieleSituatieLaatste12Maanden": {
+      "columns": [
+        "FinancieleSituatieLaatste12Maanden_6"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: FinancieleSituatieLaatste12Maanden (1 features, source unknown)."
+    },
+    "GunstigeTijdVoorGroteAankopen": {
+      "columns": [
+        "GunstigeTijdVoorGroteAankopen_8"
+      ],
+      "source_table": "",
+      "description": "CBS metrics: GunstigeTijdVoorGroteAankopen (1 features, source unknown)."
     },
     "LoonkostenPerArbeidsjaar": {
       "columns": [
@@ -181,7 +167,6 @@
         "NietSeizoengecorrigeerd_11_T001038_53310",
         "NietSeizoengecorrigeerd_11_T001038_53825",
         "NietSeizoengecorrigeerd_13_T001038_53050",
-        "NietSeizoengecorrigeerd_13_T001038_53310",
         "NietSeizoengecorrigeerd_1_T001038_53050",
         "NietSeizoengecorrigeerd_1_T001038_53310",
         "NietSeizoengecorrigeerd_5_T001038_53310",
@@ -190,7 +175,7 @@
         "NietSeizoengecorrigeerd_9_T001038_53825"
       ],
       "source_table": "",
-      "description": "CBS metrics: NietSeizoengecorrigeerd (11 features, source unknown)."
+      "description": "CBS metrics: NietSeizoengecorrigeerd (10 features, source unknown)."
     },
     "Seizoengecorrigeerd": {
       "columns": [
@@ -199,148 +184,27 @@
       "source_table": "",
       "description": "CBS metrics: Seizoengecorrigeerd (1 features, source unknown)."
     },
-    "Totaal": {
+    "VervuldeVacatures": {
       "columns": [
-        "Totaal_30"
+        "VervuldeVacatures_3"
       ],
       "source_table": "",
-      "description": "CBS metrics: Totaal (1 features, source unknown)."
+      "description": "CBS metrics: VervuldeVacatures (1 features, source unknown)."
     },
     "labor_volume": {
       "columns": [
-        "GewerkteUrenPerBaan_10_A045286_T001038",
-        "GewerkteUrenPerWerkzamePersoon_4_A045285_T001038",
-        "GewerkteUrenPerWerkzamePersoon_4_A045286_T001038",
         "GewerkteUren_24",
-        "GewerkteUren_3_A045285_T001038"
+        "GewerkteUren_26"
       ],
       "source_table": "85920NED",
-      "description": "CBS metrics: GewerkteUren, GewerkteUrenPerBaan, GewerkteUrenPerWerkzamePersoon (5 features, 85920NED)."
+      "description": "CBS metrics: GewerkteUren (2 features, 85920NED)."
     },
     "workforce": {
       "columns": [
-        "WerkzamePersonenSeizoengecorrigeerd_9_T001413",
-        "WerkzamePersonen_1_A045285_T001038"
+        "Banen_8_T001413"
       ],
       "source_table": "85920NED",
-      "description": "CBS metrics: WerkzamePersonen, WerkzamePersonenSeizoengecorrigeerd (2 features, 85920NED)."
-    },
-    "y_BuikMaagOfDarmen": {
-      "columns": [
-        "y_BuikMaagOfDarmen_17_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_BuikMaagOfDarmen (1 features, source unknown)."
-    },
-    "y_HeupBenenKnieenVoeten": {
-      "columns": [
-        "y_HeupBenenKnieenVoeten_11_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_HeupBenenKnieenVoeten (1 features, source unknown)."
-    },
-    "y_Huid": {
-      "columns": [
-        "y_Huid_18_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_Huid (1 features, source unknown)."
-    },
-    "y_LangdurigDezelfdeHandelingOfPcWerk": {
-      "columns": [
-        "y_LangdurigDezelfdeHandelingOfPcWerk_48_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_LangdurigDezelfdeHandelingOfPcWerk (1 features, source unknown)."
-    },
-    "y_MaandloonInclusiefOverwerk": {
-      "columns": [
-        "y_MaandloonInclusiefOverwerk_4_T001038_T001007_10000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_MaandloonInclusiefOverwerk (1 features, source unknown)."
-    },
-    "y_PerArbeidsjaar": {
-      "columns": [
-        "y_PerArbeidsjaar_13_T001038_T001007_10000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_PerArbeidsjaar (1 features, source unknown)."
-    },
-    "y_PerBaanPerJaar": {
-      "columns": [
-        "y_PerBaanPerJaar_12_T001038_T001007_10000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_PerBaanPerJaar (1 features, source unknown)."
-    },
-    "y_ProblemenMetKlanten": {
-      "columns": [
-        "y_ProblemenMetKlanten_52_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ProblemenMetKlanten (1 features, source unknown)."
-    },
-    "y_PsychischOverspannenheidBurnOut": {
-      "columns": [
-        "y_PsychischOverspannenheidBurnOut_13_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_PsychischOverspannenheidBurnOut (1 features, source unknown)."
-    },
-    "y_ScoreGeluk": {
-      "columns": [
-        "y_ScoreGeluk_1_T009002_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ScoreGeluk (1 features, source unknown)."
-    },
-    "y_ScoreTevredenheidMetSociaalLeven": {
-      "columns": [
-        "y_ScoreTevredenheidMetSociaalLeven_57_T009002_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ScoreTevredenheidMetSociaalLeven (1 features, source unknown)."
-    },
-    "y_ScoreTevredenheidMetWerk": {
-      "columns": [
-        "y_ScoreTevredenheidMetWerk_13_T009002_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ScoreTevredenheidMetWerk (1 features, source unknown)."
-    },
-    "y_ScoreTevredenheidMetWoning": {
-      "columns": [
-        "y_ScoreTevredenheidMetWoning_45_T009002_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ScoreTevredenheidMetWoning (1 features, source unknown)."
-    },
-    "y_ScoreTevredenheidOpleidingskansen": {
-      "columns": [
-        "y_ScoreTevredenheidOpleidingskansen_9_T009002_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ScoreTevredenheidOpleidingskansen (1 features, source unknown)."
-    },
-    "y_ScoreZorgenOverFinancieleToekomst": {
-      "columns": [
-        "y_ScoreZorgenOverFinancieleToekomst_41_T009002_MW00000"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_ScoreZorgenOverFinancieleToekomst (1 features, source unknown)."
-    },
-    "y_WerkzameBeroepsbevolking": {
-      "columns": [
-        "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021320",
-        "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021342",
-        "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021344",
-        "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021350",
-        "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021398",
-        "y_WerkzameBeroepsbevolking_1_T001038_T009002_2021420"
-      ],
-      "source_table": "",
-      "description": "CBS metrics: y_WerkzameBeroepsbevolking (6 features, source unknown)."
+      "description": "CBS metrics: Banen (1 features, 85920NED)."
     }
   }
 }

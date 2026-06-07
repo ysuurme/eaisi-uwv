@@ -174,6 +174,7 @@ def run_pipeline(
                 threshold_r2=threshold_r2,
                 tags={"data_source": gold_table, "sector": sector_label, "status": "candidate"},
                 description=f"Model {model_name} | sector={sector_label} | 4Q ahead.",
+                session=session,  # enables passed_gate SQL update + MLflow tagging in one call
             )
 
             if passed:
