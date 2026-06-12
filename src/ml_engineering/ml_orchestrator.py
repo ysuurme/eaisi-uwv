@@ -6,7 +6,8 @@ Integrates all pipeline steps into a single sequential flow:
     Step 2: Data Validation     — schema, completeness, dtype checks
     Step 3: Data Preparation    — train/test split, type casting
     Step 4: Model Training      — fit/tune estimator with MLflow tracking
-    Step 5: Model Evaluation    — compute test-set metrics
+    Step 5: Model Evaluation    — compute test-set metrics + per-row predictions
+                                  (with inner/outer fold labelling for honest CV)
     Step 6: Model Validation    — quality gate + MLflow registration
 
 Future: Step 7 — Model Deployment (inference service) [not yet implemented]
@@ -49,11 +50,56 @@ def _configure_mlflow(db_eval_path: Path) -> str:
 
 
 def _ensure_eval_db(engine) -> None:
-    """Creates evaluation tables and enables WAL mode for SQLite concurrency."""
+    """Creates evaluation tables, enables WAL mode, and validates schema.
+
+    On first run the per-row prediction table is created from scratch.
+
+    SCHEMA CHECK (fail-fast):
+        If ``model_predictions`` already exists but is missing the ``fold_set``
+        column required by the nested-CV evaluator (ml_5_model_evaluation.py),
+        this function raises ``RuntimeError`` with explicit migration SQL.
+        ``Base.metadata.create_all`` is a no-op for existing tables — it does
+        NOT add columns that were introduced after the table's first creation.
+        So we must check explicitly.
+    """
     with engine.connect() as conn:
         conn.execute(text("PRAGMA journal_mode=WAL"))
         conn.commit()
     Base.metadata.create_all(engine)
+
+    # ── Schema check: enforce fold_set column on model_predictions ──────
+    insp = sa_inspect(engine)
+    if "model_predictions" in insp.get_table_names():
+        existing_cols = {c["name"] for c in insp.get_columns("model_predictions")}
+        if "fold_set" not in existing_cols:
+            db_path = engine.url.database  # e.g. "data/4_eval/eval_data.db"
+            raise RuntimeError(
+                "\n"
+                "═════════════════════════════════════════════════════════════════════\n"
+                "  SCHEMA MISMATCH — model_predictions lacks 'fold_set' column\n"
+                "═════════════════════════════════════════════════════════════════════\n"
+                "  The updated ml_5_model_evaluation.py writes inner/outer fold labels\n"
+                "  via a 'fold_set' column.  Your existing model_predictions table was\n"
+                "  created before this column existed and SQLAlchemy's create_all() is\n"
+                "  a no-op for existing tables.\n"
+                "\n"
+                "  Apply ONE of these migrations and re-run:\n"
+                "\n"
+                "  (A) DROP + recreate (simplest; deletes old predictions):\n"
+                f"        sqlite3 {db_path}\n"
+                "        DROP TABLE model_predictions;\n"
+                "\n"
+                "  (B) ALTER TABLE (preserves old rows, marks them as 'outer'):\n"
+                f"        sqlite3 {db_path}\n"
+                "        ALTER TABLE model_predictions\n"
+                "        ADD COLUMN fold_set VARCHAR(8) NOT NULL DEFAULT 'outer';\n"
+                "\n"
+                "  Note: under option (B), old rows will NOT have inner-fold predictions,\n"
+                "  so the loader's per_sector_honest mode will treat them as ineligible\n"
+                "  for variant selection (correct behaviour — only re-runs with the new\n"
+                "  ml_5 will produce eligible inner-fold data).\n"
+                "═════════════════════════════════════════════════════════════════════\n"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +125,9 @@ def run_pipeline(
             (aggregate across all sectors to one quarterly series).
         n_test_points: Number of quarterly evaluation points for walk-forward
             assessment.  Must be divisible by 4.  Default 20 = 5 origins × 4Q.
-        threshold_r2: Minimum R² score to pass the quality gate.
+            ml_5 splits these into 2 inner + 3 outer origins for nested CV.
+        threshold_r2: Minimum R² score to pass the quality gate.  Note: with
+            the inner/outer split, R² is now computed on OUTER folds only.
     """
     # --- Select Estimator ---
     config = ModelConfiguration.get(experiment_key)
@@ -149,7 +197,11 @@ def run_pipeline(
             )
 
             # --- Step 5: Model Evaluation ---
-            f_log("Step 5 | Evaluating on test set...", c_type="process")
+            # sector_code is passed explicitly so per-row predictions in
+            # model_predictions carry the sector identifier without relying
+            # on the model_name parsing fallback.  The returned `metrics`
+            # are computed on OUTER folds only (honest estimate).
+            f_log("Step 5 | Evaluating on test set (nested CV)...", c_type="process")
             evaluator = ModelEvaluator(session=session)
             metrics = evaluator.evaluate(
                 run_id=run_id,
@@ -160,6 +212,7 @@ def run_pipeline(
                 y_test=y_test,
                 model_name=model_name,
                 n_test_points=n_test_points,
+                sector_code=sector_label,
             )
 
             # --- Commit training + evaluation records atomically ---
@@ -174,7 +227,6 @@ def run_pipeline(
                 threshold_r2=threshold_r2,
                 tags={"data_source": gold_table, "sector": sector_label, "status": "candidate"},
                 description=f"Model {model_name} | sector={sector_label} | 4Q ahead.",
-                session=session,  # enables passed_gate SQL update + MLflow tagging in one call
             )
 
             if passed:
