@@ -30,7 +30,7 @@ from sktime.performance_metrics.forecasting import MeanSquaredError
 from sqlalchemy.orm import Session
 
 from src.ml_engineering.model_configs import (
-    _ACTIVE_PRESET_NAME,
+    _FEATURE_CATALOG_FILE,
     ModelExperiment,
     ModelTuningRecord,
     SectorQuarterRollingMean,
@@ -128,8 +128,8 @@ class ModelTrainer:
     ) -> None:
         """Logs feature + config provenance so any run is reproducible.
 
-        Captures the named feature groups, the active preset, the catalog key,
-        the estimator class, and a stable hash of the resolved feature columns
+        Captures the named feature groups, the feature-catalog file, the
+        catalog key, the estimator class, and a stable hash of the resolved feature columns
         (also dumped as a ``features.json`` artifact).  Together with the
         best-params logged after tuning, this makes two runs of the same
         estimator distinguishable purely from MLflow metadata.
@@ -142,7 +142,7 @@ class ModelTrainer:
             "experiment_key": lineage.get("experiment_key", "unknown"),
             "model_name": experiment.name,
             "feature_groups": json.dumps(groups) if groups is not None else "discovery",
-            "active_preset": _ACTIVE_PRESET_NAME,
+            "feature_catalog": _FEATURE_CATALOG_FILE,
             "estimator_class": type(experiment.estimator).__name__,
             "base_estimator_class": base_estimator,
         })

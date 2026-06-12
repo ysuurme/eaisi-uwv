@@ -226,6 +226,33 @@ def validate_presets() -> dict[str, list[str]]:
         if set(cats) - known
     }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE SELECTION
+# ═══════════════════════════════════════════════════════════════════════════
+# Configuration for the feature-selection flow (``main.py --select-features``
+# → ``ml_orchestrator.run_feature_selection``).  Candidate features are
+# restricted to columns originating from CBS tables whose registry frequency
+# is listed below.  Yearly tables are excluded by default: their quarterly
+# representation is a disaggregation artifact (replication/interpolation)
+# whose transformation choices would otherwise leak into model training.
+# Monthly tables are true intra-quarter observations aggregated to quarters
+# and therefore eligible.
+FEATURE_SELECTION_FREQUENCIES: tuple[str, ...] = ("quarterly", "monthly")
+
+# Sequential funnel parameters (validated in the notebook feature study).
+# Each filter receives the survivors of the previous one; the full chain is
+# persisted in the generated feature_catalog.json for lineage.
+FEATURE_SELECTION_FUNNEL: dict[str, dict] = {
+    "near_constant":      {"max_fraction": 0.95},
+    "correlation":        {"threshold": 0.21, "method": "within_sector_differenced"},
+    "lagged_correlation": {"threshold": 0.12, "horizons": [1, 2, 3]},
+    "granger":            {"max_lag": 4, "p_threshold": 0.05,
+                           "min_sector_fraction": 0.20, "difference": True},
+    "lasso_stability":    {"n_bootstraps": 100, "threshold": 0.60,
+                           "random_state": 42, "horizons": [1, 2, 3]},
+    "redundancy":         {"threshold": 0.90},
+}
+
 # --- Visualization Palette ---
 C_GREY    = "#6B7280"   # Dropped features
 C_BLUE    = "#3B82F6"   # Retained features

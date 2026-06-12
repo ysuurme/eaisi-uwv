@@ -10,12 +10,18 @@ Integrates all pipeline steps into a single sequential flow:
                                   (with inner/outer fold labelling for honest CV)
     Step 6: Model Validation    — quality gate + MLflow registration
 
+Cross-cutting entry points hosted here (the orchestrator is the hub):
+    run_sector_sweep      — run_pipeline once per SBI sector
+    run_feature_selection — gold panel (Step 1 extraction logic) → registry
+                            frequency filter → statistical funnel →
+                            feature_catalog.json (consumed by FEATURE_CATALOG)
+
 Future: Step 7 — Model Deployment (inference service) [not yet implemented]
 """
 import json
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import mlflow
 import mlflow.sklearn
@@ -24,8 +30,23 @@ from sqlalchemy.orm import sessionmaker
 
 from sqlalchemy import inspect as sa_inspect
 
-from src.config import DIR_DB_GOLD, DIR_DB_EVAL, ML_TARGET_COLUMN, PROJECT_ROOT
-from src.ml_engineering.model_configs import Base, ModelConfiguration
+from src.config import (
+    CBS_TABLE_REGISTRY,
+    DIR_DB_EVAL,
+    DIR_DB_GOLD,
+    DIR_FEATURE_SELECTION,
+    FEATURE_SELECTION_FREQUENCIES,
+    FEATURE_SELECTION_FUNNEL,
+    ML_TARGET_COLUMN,
+    PROJECT_ROOT,
+    get_category_for_table,
+)
+from src.ml_engineering.model_configs import (
+    _FEATURE_CATALOG_FILE,
+    Base,
+    ModelConfiguration,
+    reload_feature_catalog,
+)
 
 from src.ml_engineering.ml_1_data_extraction import DataExtractor
 from src.ml_engineering.ml_2_data_validation import DataValidator
@@ -34,6 +55,15 @@ from src.ml_engineering.ml_4_model_training import ModelTrainer, _base_estimator
 from src.ml_engineering.ml_5_model_evaluation import ModelEvaluator
 from src.ml_engineering.ml_6_model_validation import ModelValidator
 
+from src.utils.feature_selection_utils import (
+    apply_correlation_filter,
+    apply_granger_filter,
+    apply_lagged_correlation_filter,
+    apply_lasso_stability_filter,
+    apply_near_constant_filter,
+    apply_redundancy_filter,
+    save_preset_to_json,
+)
 from src.utils.m_log import f_log
 
 
@@ -269,6 +299,246 @@ def run_sector_sweep(
             f_log(f"Sector {sector_label} failed: {exc}", c_type="error")
 
     f_log("Sector sweep complete.", c_type="complete")
+
+
+# ---------------------------------------------------------------------------
+# Feature Selection Entry Point
+# ---------------------------------------------------------------------------
+
+#: Prefix marking yearly-derived columns in the gold layer.
+_YEARLY_PREFIX = "y_"
+
+#: Synthetic sector column added by DataExtractor.load_full_panel().
+_SECTOR_COL = "sector"
+
+
+def run_feature_selection(
+    gold_table: str = "master_data_ml_preprocessed",
+    funnel_params: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Path:
+    """Derives the canonical feature catalog from the gold feature store.
+
+    Flow (mirrors the numbered pipeline structure):
+        Step 1 (DataExtractor) — load the full panel and derive candidate
+            feature columns from the gold table (``derive_feature_columns`` is
+            the single source of truth for what counts as a feature column);
+        Registry filter — keep only columns originating from CBS tables whose
+            frequency is in ``FEATURE_SELECTION_FREQUENCIES``; yearly-derived
+            ``y_*`` columns are excluded belt-and-braces;
+        Statistical funnel — sequential filters (near-constant → correlation →
+            lagged correlation → Granger → LASSO stability → redundancy)
+            reduce the candidates to a feature set with explanatory power;
+        Catalog write — survivors are grouped by registry category and
+            persisted as ``feature_catalog.json``, the file that
+            ``model_configs.FEATURE_CATALOG`` loads.
+
+    Args:
+        gold_table: Name of the preprocessed table in the gold feature store.
+        funnel_params: Optional per-filter overrides merged over
+            ``config.FEATURE_SELECTION_FUNNEL``,
+            e.g. ``{"granger": {"max_lag": 2}}``.
+
+    Returns:
+        Path to the written ``feature_catalog.json``.
+    """
+    f_log("Feature Selection | registry-driven statistical funnel", c_type="start")
+
+    # --- Step 1: full panel + candidate columns (DataExtractor logic) ---
+    df = DataExtractor.load_full_panel(DIR_DB_GOLD, gold_table)
+    all_features = DataExtractor.derive_feature_columns(df, ML_TARGET_COLUMN)
+
+    # --- Registry filter: frequency-eligible origins only ---
+    origin = _load_column_origin()
+    allowed_tables = {
+        tid for tid, meta in CBS_TABLE_REGISTRY.items()
+        if meta["frequency"] in FEATURE_SELECTION_FREQUENCIES
+        and meta["category"] != "target"
+    }
+    candidates, exclusions = _partition_candidates(all_features, origin, allowed_tables)
+    f_log(
+        f"Candidate pool | {len(candidates)} eligible of {len(all_features)} "
+        f"(excluded: {exclusions['yearly_prefix']} yearly-prefixed, "
+        f"{exclusions['frequency']} non-{'/'.join(FEATURE_SELECTION_FREQUENCIES)} origin, "
+        f"{exclusions['unknown_origin']} unknown origin)",
+        c_type="process",
+    )
+    if not candidates:
+        raise RuntimeError(
+            f"No candidate features after registry filtering. Exclusions: {exclusions}"
+        )
+
+    # --- Statistical funnel (sequential) ---
+    params = {
+        name: {**defaults, **(funnel_params or {}).get(name, {})}
+        for name, defaults in FEATURE_SELECTION_FUNNEL.items()
+    }
+    chain = _apply_funnel(df, candidates, params)
+    survivors = chain[-1]["retained"]
+    if not survivors:
+        raise RuntimeError(
+            "Feature-selection funnel eliminated every candidate — refusing to "
+            "write an empty catalog. Inspect FEATURE_SELECTION_FUNNEL thresholds."
+        )
+
+    # --- Group by registry category + write the canonical catalog ---
+    groups, ungrouped = _group_by_registry_category(survivors, origin)
+    path = save_preset_to_json(
+        preset_name="feature_catalog",
+        output_dir=DIR_FEATURE_SELECTION,
+        survivors=survivors,
+        feature_groups=groups,
+        filter_chain=chain,
+        input_shape=df.shape,
+        description=(
+            "Canonical feature catalog generated by run_feature_selection. "
+            f"Candidates restricted to registry frequencies "
+            f"{list(FEATURE_SELECTION_FREQUENCIES)}; survivors grouped by "
+            "registry category."
+        ),
+        ungrouped_survivors=ungrouped,
+        filename=_FEATURE_CATALOG_FILE,
+        extra_metadata={
+            "gold_table": gold_table,
+            "target": ML_TARGET_COLUMN,
+            "frequencies_included": list(FEATURE_SELECTION_FREQUENCIES),
+            "candidate_pool": {
+                "n_candidates": len(candidates),
+                "allowed_tables": sorted(allowed_tables),
+                **{f"excluded_{k}": v for k, v in exclusions.items()},
+            },
+        },
+    )
+
+    # Refresh the in-process catalog so selection + training can run in one process.
+    reload_feature_catalog()
+
+    f_log(
+        f"Feature catalog written: {path.name} | {len(candidates)} candidates → "
+        f"{len(survivors)} survivors in {len(groups)} groups "
+        f"({', '.join(sorted(groups))})",
+        c_type="complete",
+    )
+    return path
+
+
+def _load_column_origin() -> Dict[str, str]:
+    """Column → CBS table ID mapping, written by the gold loader."""
+    origin_path = DIR_FEATURE_SELECTION / "column_origin.json"
+    if not origin_path.exists():
+        raise FileNotFoundError(
+            f"column_origin.json not found at {origin_path}. It is written by "
+            "the gold loader — run `python main.py --refresh-data` first."
+        )
+    with open(origin_path) as fh:
+        return json.load(fh)
+
+
+def _partition_candidates(
+    feature_cols: List[str],
+    origin: Dict[str, str],
+    allowed_tables: set,
+) -> tuple:
+    """Split feature columns into funnel candidates and exclusion counts."""
+    candidates: List[str] = []
+    exclusions = {"yearly_prefix": 0, "frequency": 0, "unknown_origin": 0}
+    unknown: List[str] = []
+    for col in feature_cols:
+        if col.startswith(_YEARLY_PREFIX):
+            exclusions["yearly_prefix"] += 1
+        elif col not in origin:
+            exclusions["unknown_origin"] += 1
+            unknown.append(col)
+        elif origin[col] in allowed_tables:
+            candidates.append(col)
+        else:
+            exclusions["frequency"] += 1
+    if unknown:
+        f_log(
+            "Unknown-origin columns excluded (not in column_origin.json): "
+            f"{unknown[:10]}{' …' if len(unknown) > 10 else ''}",
+            c_type="warning",
+        )
+    return candidates, exclusions
+
+
+def _apply_funnel(
+    df, candidates: List[str], params: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Sequential filter chain — each filter consumes the previous survivors."""
+    chain: List[Dict[str, Any]] = []
+
+    def _step(result: Dict[str, Any]) -> List[str]:
+        chain.append(result)
+        f_log(
+            f"Filter {result['filter']:<19} | "
+            f"{len(result['input']):>3} → {len(result['retained'])}",
+            c_type="process",
+        )
+        return result["retained"]
+
+    current = _step(apply_near_constant_filter(candidates, df, **params["near_constant"]))
+    if current:
+        current = _step(apply_correlation_filter(
+            current, df, ML_TARGET_COLUMN,
+            sector_col=_SECTOR_COL, **params["correlation"],
+        ))
+    if current:
+        current = _step(apply_lagged_correlation_filter(
+            current, df, ML_TARGET_COLUMN,
+            sector_col=_SECTOR_COL, **params["lagged_correlation"],
+        ))
+    if current:
+        current = _step(apply_granger_filter(
+            current, df, ML_TARGET_COLUMN,
+            sector_col=_SECTOR_COL, **params["granger"],
+        ))
+    if current:
+        current = _step(apply_lasso_stability_filter(
+            current, df, ML_TARGET_COLUMN,
+            sector_col=_SECTOR_COL, **params["lasso_stability"],
+        ))
+    if current:
+        current = _step(apply_redundancy_filter(
+            current, df, ML_TARGET_COLUMN,
+            sector_col=_SECTOR_COL, **params["redundancy"],
+        ))
+    return chain
+
+
+def _group_by_registry_category(
+    survivors: List[str],
+    origin: Dict[str, str],
+) -> tuple:
+    """Group survivors by registry category — the model-facing vocabulary."""
+    by_category: Dict[str, Dict[str, Any]] = {}
+    ungrouped: List[str] = []
+    for col in sorted(survivors):
+        category = get_category_for_table(origin.get(col, ""))
+        if category is None:
+            ungrouped.append(col)
+            continue
+        entry = by_category.setdefault(category, {"columns": [], "tables": set()})
+        entry["columns"].append(col)
+        entry["tables"].add(origin[col])
+
+    groups = {
+        name: {
+            "columns": meta["columns"],
+            "source_table": ", ".join(sorted(meta["tables"])),
+            "description": (
+                f"Registry category '{name}': {len(meta['columns'])} surviving "
+                f"features from {', '.join(sorted(meta['tables']))}."
+            ),
+        }
+        for name, meta in sorted(by_category.items())
+    }
+    if ungrouped:
+        f_log(
+            f"{len(ungrouped)} survivors without a registry category stay "
+            f"ungrouped (still reachable via all_survivors): {ungrouped}",
+            c_type="warning",
+        )
+    return groups, ungrouped
 
 
 if __name__ == "__main__":

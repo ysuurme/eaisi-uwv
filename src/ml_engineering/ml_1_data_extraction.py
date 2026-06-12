@@ -119,10 +119,7 @@ class DataExtractor:
             feature_columns = self._resolve_groups(feature_groups, available_columns)
             mode = "groups"
         else:
-            feature_columns = [
-                c for c in df.columns
-                if c != target_column and c not in _STRUCTURAL_COLUMNS
-            ]
+            feature_columns = self.derive_feature_columns(df, target_column)
             mode = "discovery"
 
         structural_present = [c for c in df.columns if c in _KEEP_STRUCTURAL]
@@ -142,6 +139,34 @@ class DataExtractor:
             c_type="success",
         )
         return df
+
+    # ------------------------------------------------------------------
+    # Feature-column derivation (single source of truth)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def derive_feature_columns(
+        cls,
+        df: pd.DataFrame,
+        target_column: str,
+    ) -> List[str]:
+        """Derive candidate ML feature columns from a gold-table frame.
+
+        Single source of truth for "what is a feature column": every column
+        except the target, the structural context (date/temporal keys, regime
+        indicators, pipeline artefacts), the OHE sector indicators, and the
+        synthetic ``sector`` label added by ``load_full_panel()``.
+
+        Used by ``extract()`` in discovery mode (where OHE columns are already
+        dropped) and by the feature-selection flow
+        (``ml_orchestrator.run_feature_selection``), which operates on the full
+        panel.  Column order follows the frame (deterministic).
+        """
+        excluded = _STRUCTURAL_COLUMNS | {target_column, "sector"}
+        return [
+            c for c in df.columns
+            if c not in excluded and not c.startswith(_OHE_PREFIX)
+        ]
 
     # ------------------------------------------------------------------
     # Full-panel loader for feature selection

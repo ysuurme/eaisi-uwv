@@ -296,7 +296,7 @@ Linear-family estimators (`structural_linear`, `linear`, `ridge`, `elasticnet`, 
 **4. Model Training (`ml_4_model_training.py`)**
 - **Baseline path** (`SectorQuarterRollingMean`): standard sklearn `.fit(X, y)`, logged via `mlflow.sklearn.log_model`.
 - **sktime path** (all others): `.fit(y=y_train, X=X_numeric)`, tuned via `ForecastingGridSearchCV` + `ExpandingWindowSplitter`, wrapped in a pyfunc for registry compatibility.
-- Logs full **reproducibility lineage**: `experiment_key`, `model_name`, `model_type` (the underlying algorithm, unwrapped from the sktime reducer), `feature_groups`, `active_preset`, `best_params`, `param_grid`, a `feature_set_hash` tag, and a `features.json` artifact — so any run is reproducible and two runs of the same estimator are distinguishable from MLflow metadata alone.
+- Logs full **reproducibility lineage**: `experiment_key`, `model_name`, `model_type` (the underlying algorithm, unwrapped from the sktime reducer), `feature_groups`, `feature_catalog`, `best_params`, `param_grid`, a `feature_set_hash` tag, and a `features.json` artifact — so any run is reproducible and two runs of the same estimator are distinguishable from MLflow metadata alone.
 
 **5. Model Evaluation (`ml_5_model_evaluation.py`)**
 - Walk-forward (rolling-origin) evaluation with nested inner/outer folds; headline metrics are computed on the honest **outer** folds.

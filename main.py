@@ -3,11 +3,20 @@ Main Entry Point for EAISI UWV ML Pipeline.
 
 Usage
 -----
+Data engineering (raw → bronze → silver → gold):
+    python main.py --refresh-data
+
+Feature selection (gold → statistical funnel → feature_catalog.json):
+    python main.py --select-features
+
 All-industry mode (default):
     python main.py <gold_table> <model_key> [sbi_filter_col] [group1,group2,...]
 
 Sector-specific mode:
     python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
+
+Sector sweep (all SBI sectors, one run each):
+    python main.py master_data_ml_preprocessed baseline --all-sectors
 
 Examples:
     python main.py master_data_ml_preprocessed baseline
@@ -18,7 +27,11 @@ Examples:
 import sys
 
 from src.config import START_MLFLOW_UI
-from src.ml_engineering.ml_orchestrator import run_pipeline, run_sector_sweep
+from src.ml_engineering.ml_orchestrator import (
+    run_feature_selection,
+    run_pipeline,
+    run_sector_sweep,
+)
 from src.utils.m_log import setup_logging, f_log
 from src.utils.m_mlflow_ui import ensure_mlflow_ui
 
@@ -50,6 +63,12 @@ def main() -> None:
     if "--refresh-data" in sys.argv:
         sys.argv.remove("--refresh-data")
         run_data_pipeline()
+
+    if "--select-features" in sys.argv:
+        sys.argv.remove("--select-features")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_feature_selection(gold_table=gold_table)
+        return
 
     gold_table    = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
     model_key     = sys.argv[2] if len(sys.argv) > 2 else "linear"

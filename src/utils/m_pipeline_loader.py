@@ -222,8 +222,9 @@ def load_pipeline_honest(
         warnings.warn(
             "Predictions table has no 'fold_set' column. Falling back to "
             "treating every row as 'outer' — variant selection cannot use "
-            "inner folds and will be test-set biased. Re-run run_overnight.py "
-            "with the updated ml_5_model_evaluation.py to enable honest CV.",
+            "inner folds and will be test-set biased. Re-run the sector sweep "
+            "(main.py <table> <model> --all-sectors) with the updated "
+            "ml_5_model_evaluation.py to enable honest CV.",
             stacklevel=2,
         )
         df["fold_set"] = "outer"
@@ -328,8 +329,9 @@ def _select_per_sector_honest(
         warnings.warn(
             "No inner-fold rows found. Variant selection falls back to "
             "outer-fold MAE (biased — equivalent to per_sector_legacy). "
-            "To enable honest selection, re-run run_overnight.py with the "
-            "updated ml_5_model_evaluation.py.",
+            "To enable honest selection, re-run the sector sweep "
+            "(main.py <table> <model> --all-sectors) with the updated "
+            "ml_5_model_evaluation.py.",
             stacklevel=3,
         )
         return _select_per_sector_legacy(df, outer_df, variant_keys, has_run_id)

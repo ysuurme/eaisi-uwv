@@ -74,6 +74,19 @@ class TestMain(unittest.TestCase):
         )
 
     @patch("main.run_pipeline")
+    @patch("main.run_feature_selection")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_select_features_flag(self, mock_ui, mock_select, mock_run):
+        """--select-features runs the selection flow and exits (no training)."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "--select-features"]):
+            from main import main
+            main()
+
+        mock_select.assert_called_once_with(gold_table="master_data_ml_preprocessed")
+        mock_run.assert_not_called()
+
+    @patch("main.run_pipeline")
     @patch("main.ensure_mlflow_ui")
     def test_main_feature_groups_parsed(self, mock_ui, mock_run):
         """Verify CLI feature group names are split and passed correctly (with sbi col)."""

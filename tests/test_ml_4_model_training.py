@@ -131,7 +131,7 @@ class TestModelTraining(unittest.TestCase):
 
         self.assertIn("feature_groups", logged)
         self.assertIn("labor_volume", logged["feature_groups"])
-        self.assertIn("active_preset", logged)
+        self.assertIn("feature_catalog", logged)
         self.assertEqual(logged["experiment_key"], "random_forest")
         # Clear, human-readable model identity (not the opaque sktime wrapper).
         self.assertEqual(logged["model_name"], "RandomForest_Reduced")
