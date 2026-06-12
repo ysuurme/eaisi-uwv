@@ -9,14 +9,39 @@ margin; Poor when the champion fails to beat the baseline at all.
 The registry (MlflowClient) is mocked at the boundary; the per-sector baseline
 MAPE is injected as a dict; the tier logic is exercised as a pure function.
 """
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock
+
+import pandas as pd
 
 from src.utils.m_sector_quality import (
     assign_tier,
     build_sector_quality_table,
+    enrich_with_hierarchy,
+    load_sector_performance,
     sound_result_sectors,
+    to_tree,
+    write_sector_performance,
 )
+
+
+def _enriched_df():
+    return pd.DataFrame({
+        "sector_code":   ["T001081", "301000", "305700"],
+        "sbi_title":     ["All economic activities", "Agriculture", "Mining"],
+        "sbi_level":     ["totaal", "section", "section"],
+        "model_family":  ["Ridge_Reduced", "HistGBR_Reduced", "SectorQuarterRollingMean"],
+        "model_type":    ["Ridge", "HistGradientBoostingRegressor", "SectorQuarterRollingMean"],
+        "feature_groups": ['["all_survivors"]', '["labor_volume"]', "discovery"],
+        "champion_mape": [0.05, 0.12, 0.20],
+        "baseline_mape": [0.07, 0.18, 0.20],
+        "improvement":   [0.286, 0.33, 0.0],
+        "r2":            [0.6, 0.4, -0.2],
+        "tier":          ["Good", "Good", "Poor"],
+    })
 
 
 def _registered(name):
@@ -25,9 +50,12 @@ def _registered(name):
     return rm
 
 
-def _version(mape, r2, family="Ridge_Reduced"):
+def _version(mape, r2, family="Ridge_Reduced", model_type="Ridge", feature_groups='["all_survivors"]'):
     mv = MagicMock()
-    mv.tags = {"mape": str(mape), "r2": str(r2), "model_family": family}
+    mv.tags = {
+        "mape": str(mape), "r2": str(r2), "model_family": family,
+        "model_type": model_type, "feature_groups": feature_groups,
+    }
     return mv
 
 
@@ -93,9 +121,15 @@ class TestBuildSectorQualityTable(unittest.TestCase):
         self.assertEqual(set(df["sector_code"]), {"T001081", "301000"})
         self.assertEqual(
             set(df.columns),
-            {"sector_code", "model_family", "champion_mape", "baseline_mape",
-             "improvement", "r2", "tier"},
+            {"sector_code", "model_family", "model_type", "feature_groups",
+             "champion_mape", "baseline_mape", "improvement", "r2", "tier"},
         )
+
+    def test_champion_self_description_columns_populated(self):
+        df = self._build()
+        row = df[df["sector_code"] == "T001081"].iloc[0]
+        self.assertEqual(row["model_type"], "Ridge")
+        self.assertEqual(row["feature_groups"], '["all_survivors"]')
 
     def test_tiers_benchmarked_against_baseline(self):
         df = self._build()
@@ -107,6 +141,55 @@ class TestBuildSectorQualityTable(unittest.TestCase):
 
     def test_sound_result_sectors_lists_good_tier(self):
         self.assertEqual(sound_result_sectors(self._build()), ["T001081"])
+
+
+class TestSectorHierarchyStructure(unittest.TestCase):
+    def test_enrich_with_hierarchy_adds_title_and_level(self):
+        q = pd.DataFrame({"sector_code": ["T001081", "301000"], "champion_mape": [0.05, 0.12]})
+        hierarchy = {
+            "T001081": {"sbi_title": "All", "sbi_level": "totaal"},
+            "301000": {"sbi_title": "Agri", "sbi_level": "section"},
+        }
+        out = enrich_with_hierarchy(q, hierarchy)
+        self.assertEqual(out.loc[out.sector_code == "301000", "sbi_level"].iloc[0], "section")
+        self.assertEqual(out.loc[out.sector_code == "T001081", "sbi_title"].iloc[0], "All")
+
+    def test_enrich_unknown_sector_is_labelled_not_dropped(self):
+        q = pd.DataFrame({"sector_code": ["999999"], "champion_mape": [0.1]})
+        out = enrich_with_hierarchy(q, {})
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.iloc[0]["sbi_level"], "unknown")
+
+    def test_to_tree_roots_at_national_total_and_is_json_serializable(self):
+        tree = to_tree(_enriched_df())
+        self.assertEqual(tree["sector_code"], "T001081")
+        self.assertEqual(len(tree["children"]), 2)
+        # leading attributes are present on every node
+        child = tree["children"][0]
+        for key in ["sector_code", "sbi_level", "model_family", "model_type",
+                    "champion_mape", "baseline_mape", "improvement", "tier"]:
+            self.assertIn(key, child)
+        json.dumps(tree)  # must not raise — JSON-serializable (NaN → None)
+
+    def test_write_then_load_sector_performance_roundtrip(self):
+        enriched = _enriched_df()
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "eval.db"
+            n = write_sector_performance(enriched, db)
+            self.assertEqual(n, len(enriched))
+            loaded = load_sector_performance(db)
+            self.assertEqual(set(loaded["sector_code"]), set(enriched["sector_code"]))
+            for col in ["model_type", "feature_groups", "tier", "improvement", "sbi_level"]:
+                self.assertIn(col, loaded.columns)
+
+    def test_write_is_idempotent_replace(self):
+        enriched = _enriched_df()
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "eval.db"
+            write_sector_performance(enriched, db)
+            write_sector_performance(enriched.head(1), db)  # replace, not append
+            loaded = load_sector_performance(db)
+            self.assertEqual(len(loaded), 1)
 
 
 if __name__ == "__main__":

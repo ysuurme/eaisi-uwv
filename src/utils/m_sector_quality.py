@@ -34,8 +34,8 @@ _DEFAULT_PREFIX = "master_SickLeave_4Q_"
 _PROD_ALIAS = "prod"
 _BASELINE_FAMILY = "SectorQuarterRollingMean"
 _COLUMNS = [
-    "sector_code", "model_family", "champion_mape", "baseline_mape",
-    "improvement", "r2", "tier",
+    "sector_code", "model_family", "model_type", "feature_groups",
+    "champion_mape", "baseline_mape", "improvement", "r2", "tier",
 ]
 
 #: Documented default: champion must cut MAPE by ≥ 10% vs baseline to be "Good".
@@ -148,6 +148,8 @@ def build_sector_quality_table(
         rows.append({
             "sector_code": sector,
             "model_family": tags.get("model_family", ""),
+            "model_type": tags.get("model_type", ""),
+            "feature_groups": tags.get("feature_groups", ""),
             "champion_mape": champ,
             "baseline_mape": base,
             "improvement": _improvement(champ, base),
@@ -180,6 +182,151 @@ def write_report(df: pd.DataFrame, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
     return path
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# SBI hierarchy enrichment + materialised read-model (viz DB)
+# ───────────────────────────────────────────────────────────────────────────
+
+_NATIONAL_TOTAL = "T001081"
+
+
+def load_sbi_hierarchy(dimension_json_path) -> Dict[str, Dict[str, str]]:
+    """Build ``{sector_code: {sbi_title, sbi_level}}`` from the CBS SBI dimension.
+
+    Leverages the generic CBS dimension parser in ``m_sbi_classifier`` (utils),
+    keeping the UWV-specific assembly here.
+    """
+    from src.utils.m_sbi_classifier import _f_load_cbs_dimension_lookup
+    df = _f_load_cbs_dimension_lookup(Path(dimension_json_path))
+    return {
+        str(row["Key"]).strip(): {
+            "sbi_title": str(row.get("Title", "")),
+            "sbi_level": str(row.get("sbi_level", "unknown")),
+        }
+        for _, row in df.iterrows()
+    }
+
+
+def enrich_with_hierarchy(quality_df, hierarchy: Dict[str, Dict[str, str]]) -> pd.DataFrame:
+    """Add ``sbi_title`` / ``sbi_level`` from the hierarchy. Unknown sectors are
+    labelled (``sbi_level='unknown'``), never dropped, so the tree never breaks."""
+    if quality_df is None or quality_df.empty:
+        return quality_df
+    df = quality_df.copy()
+    codes = df["sector_code"].astype(str)
+    df["sbi_title"] = codes.map(lambda c: hierarchy.get(c, {}).get("sbi_title", ""))
+    df["sbi_level"] = codes.map(lambda c: hierarchy.get(c, {}).get("sbi_level", "unknown"))
+    return df
+
+
+def _json_safe(value):
+    """Coerce pandas/numpy NaN to None so the structure is JSON-serializable."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
+def to_tree(enriched_df) -> dict:
+    """JSON-serializable nested tree: the national total at the root, every other
+    sector as a child node carrying the leading attributes (champion model,
+    model type, sector, performance vs baseline).
+
+    Finer parent/child SBI edges (section → division → group) are a future
+    refinement — children are currently flat under the national-total root.
+    """
+    if enriched_df is None or enriched_df.empty:
+        return {}
+
+    def node(record: dict) -> dict:
+        clean = {k: _json_safe(v) for k, v in record.items()}
+        clean["children"] = []
+        return clean
+
+    records = enriched_df.to_dict("records")
+    roots = [
+        r for r in records
+        if str(r.get("sector_code")) == _NATIONAL_TOTAL or r.get("sbi_level") == "totaal"
+    ]
+    if roots:
+        root_record = roots[0]
+        root = node(root_record)
+        root["children"] = [node(r) for r in records if r is not root_record]
+        return root
+    return {
+        "sector_code": "ALL", "sbi_level": "root",
+        "children": [node(r) for r in records],
+    }
+
+
+def write_sector_performance(enriched_df, eval_db_path) -> int:
+    """Materialise the enriched per-sector table into the ``sector_performance``
+    read-model (replace semantics). Returns the number of rows written."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from src.ml_engineering.model_configs import Base, SectorPerformance
+
+    engine = create_engine(
+        f"sqlite:///{Path(eval_db_path).as_posix()}", connect_args={"timeout": 30}
+    )
+    Base.metadata.create_all(engine)
+    cols = {c.name for c in SectorPerformance.__table__.columns}
+    records = [] if (enriched_df is None or enriched_df.empty) else enriched_df.to_dict("records")
+    try:
+        with sessionmaker(bind=engine)() as session:
+            session.query(SectorPerformance).delete()
+            for record in records:
+                payload = {k: _json_safe(v) for k, v in record.items() if k in cols}
+                session.add(SectorPerformance(**payload))
+            session.commit()
+    finally:
+        engine.dispose()  # release the SQLite file handle (Windows-safe)
+    return len(records)
+
+
+def load_sector_performance(eval_db_path: Optional[Path] = None) -> pd.DataFrame:
+    """Read the materialised ``sector_performance`` read-model (for charts/apps)."""
+    from sqlalchemy import create_engine
+    if eval_db_path is None:
+        from src.config import DIR_DB_EVAL
+        eval_db_path = DIR_DB_EVAL
+    engine = create_engine(f"sqlite:///{Path(eval_db_path).as_posix()}")
+    try:
+        return pd.read_sql("SELECT * FROM sector_performance", engine)
+    finally:
+        engine.dispose()
+
+
+def refresh_sector_performance(
+    eval_db_path: Optional[Path] = None,
+    dimension_json_path: Optional[Path] = None,
+    registered_model_prefix: str = _DEFAULT_PREFIX,
+) -> int:
+    """Rebuild the read-model FROM the single source of truth — MLflow champions
+    (self-describing) + baseline MAPE + the CBS SBI hierarchy — and write it to
+    ``sector_performance``. This refresh is the only write path."""
+    import mlflow
+    from mlflow.tracking import MlflowClient
+
+    if eval_db_path is None:
+        from src.config import DIR_DB_EVAL
+        eval_db_path = DIR_DB_EVAL
+    if dimension_json_path is None:
+        from src.config import DIR_DATA_RAW
+        dimension_json_path = Path(DIR_DATA_RAW) / "80072ned" / "BedrijfskenmerkenSBI2008.json"
+
+    mlflow.set_tracking_uri(f"sqlite:///{Path(eval_db_path).as_posix()}?timeout=30")
+    quality = build_sector_quality_table(
+        MlflowClient(), baseline_mape_by_sector(eval_db_path),
+        registered_model_prefix=registered_model_prefix,
+    )
+    enriched = enrich_with_hierarchy(quality, load_sbi_hierarchy(dimension_json_path))
+    return write_sector_performance(enriched, eval_db_path)
 
 
 def build_from_eval_db(eval_db_path: Optional[Path] = None) -> pd.DataFrame:

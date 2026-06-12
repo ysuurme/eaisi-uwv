@@ -42,6 +42,8 @@ class ModelValidator:
         registered_model_name: str,
         metrics: Dict[str, float],
         model_family: str,
+        model_type: str = "",
+        feature_groups: str = "",
         sector_code: str = "",
         r2_floor: Optional[float] = None,
         tags: Optional[dict] = None,
@@ -89,7 +91,7 @@ class ModelValidator:
             return False
 
         version = self._register_and_promote(
-            run_id, registered_model_name, model_family,
+            run_id, registered_model_name, model_family, model_type, feature_groups,
             candidate_mape, candidate_r2, tags, description,
         )
         f_log(
@@ -138,12 +140,19 @@ class ModelValidator:
         run_id: str,
         registered_model_name: str,
         model_family: str,
+        model_type: str,
+        feature_groups: str,
         mape: float,
         r2: float,
         tags: Optional[dict],
         description: str,
     ) -> str:
-        """Register the run's model, stamp provenance tags, move ``@prod``."""
+        """Register the run's model, stamp provenance tags, move ``@prod``.
+
+        The version is made fully self-describing — model family, the underlying
+        algorithm (model_type), the config feature groups used, and the metrics —
+        so the registry is the single source of truth for downstream views.
+        """
         model_version = mlflow.register_model(f"runs:/{run_id}/model", registered_model_name)
         version = model_version.version
 
@@ -154,6 +163,8 @@ class ModelValidator:
             "mape": repr(float(mape)),
             "r2": repr(float(r2)),
             "model_family": model_family,
+            "model_type": model_type,
+            "feature_groups": feature_groups,
             **(tags or {}),
         }
         for key, val in version_tags.items():

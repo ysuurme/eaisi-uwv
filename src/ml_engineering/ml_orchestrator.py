@@ -12,6 +12,7 @@ Integrates all pipeline steps into a single sequential flow:
 
 Future: Step 7 — Model Deployment (inference service) [not yet implemented]
 """
+import json
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -29,7 +30,7 @@ from src.ml_engineering.model_configs import Base, ModelConfiguration
 from src.ml_engineering.ml_1_data_extraction import DataExtractor
 from src.ml_engineering.ml_2_data_validation import DataValidator
 from src.ml_engineering.ml_3_data_preparation import DataPreparator
-from src.ml_engineering.ml_4_model_training import ModelTrainer
+from src.ml_engineering.ml_4_model_training import ModelTrainer, _base_estimator_name
 from src.ml_engineering.ml_5_model_evaluation import ModelEvaluator
 from src.ml_engineering.ml_6_model_validation import ModelValidator
 
@@ -194,6 +195,10 @@ def run_pipeline(
                 registered_model_name=registered_model_name,
                 metrics=metrics,
                 model_family=config.name,
+                model_type=_base_estimator_name(config.estimator),
+                feature_groups=(
+                    json.dumps(active_groups) if active_groups is not None else "discovery"
+                ),
                 sector_code=sector_label,
                 r2_floor=r2_floor,
                 tags={"data_source": gold_table, "sector": sector_label, "status": "candidate"},

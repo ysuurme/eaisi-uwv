@@ -42,7 +42,8 @@ class TestMapeChampionGate(unittest.TestCase):
         self.client.get_model_version_by_alias.side_effect = None
         self.client.get_model_version_by_alias.return_value = _champion_with_mape(mape, family)
 
-    def _call(self, mape, r2=0.7, family="Ridge_Reduced", r2_floor=None):
+    def _call(self, mape, r2=0.7, family="Ridge_Reduced", r2_floor=None,
+              model_type="Ridge", feature_groups='["all_survivors"]'):
         with patch(
             "src.ml_engineering.ml_6_model_validation.mlflow.register_model"
         ) as mock_register:
@@ -52,6 +53,8 @@ class TestMapeChampionGate(unittest.TestCase):
                 registered_model_name="SickLeave_4Q_301000",
                 metrics={"mape": mape, "r2": r2, "mae": 0.1, "rmse": 0.2},
                 model_family=family,
+                model_type=model_type,
+                feature_groups=feature_groups,
                 sector_code="301000",
                 r2_floor=r2_floor,
             )
@@ -122,17 +125,25 @@ class TestMapeChampionGate(unittest.TestCase):
         )
         self.assertEqual(float(mape_call.kwargs["value"]), precise)
 
-    def test_promoted_version_is_tagged_with_mape_r2_family(self):
-        """The registered version records mape, r2, and model_family as tags."""
+    def test_promoted_version_self_describes_family_type_and_features(self):
+        """The registered version self-describes: mape, r2, model_family,
+        model_type, and the config feature_groups used for training."""
         self._no_champion()
-        self._call(mape=0.05, r2=0.62, family="HistGBR_Reduced")
-        tagged_keys = {
-            call.kwargs.get("key", call.args[3] if len(call.args) > 3 else None)
+        self._call(
+            mape=0.05, r2=0.62, family="HistGBR_Reduced",
+            model_type="HistGradientBoostingRegressor",
+            feature_groups='["labor_volume", "workforce"]',
+        )
+        tagged = {
+            call.kwargs.get("key", call.args[3] if len(call.args) > 3 else None):
+            call.kwargs.get("value", call.args[4] if len(call.args) > 4 else None)
             for call in self.client.set_model_version_tag.call_args_list
         }
-        self.assertIn("mape", tagged_keys)
-        self.assertIn("r2", tagged_keys)
-        self.assertIn("model_family", tagged_keys)
+        self.assertIn("mape", tagged)
+        self.assertIn("r2", tagged)
+        self.assertEqual(tagged.get("model_family"), "HistGBR_Reduced")
+        self.assertEqual(tagged.get("model_type"), "HistGradientBoostingRegressor")
+        self.assertEqual(tagged.get("feature_groups"), '["labor_volume", "workforce"]')
 
 
 if __name__ == "__main__":

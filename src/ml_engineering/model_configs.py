@@ -142,6 +142,35 @@ class ModelPredictionRecord(Base):  # type: ignore  # Base imported from this mo
     # Auto-populated insert time
     timestamp:   Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
+
+class SectorPerformance(Base):
+    """Denormalised read-model for visualizations / a future explorer app.
+
+    One row per SBI sector, materialised (refreshed) FROM the single source of
+    truth — the MLflow registry champion (which self-describes model_family /
+    model_type / feature_groups / mape / r2), the baseline MAPE from
+    ``model_evaluations``, and the CBS SBI hierarchy (title + level).  This table
+    is a projection: ``m_sector_quality.refresh_sector_performance`` is the only
+    writer, so MLflow remains authoritative and this stays a clean, queryable
+    surface for charts/apps (champion · model type · sector · performance vs
+    baseline being the leading attributes).
+    """
+    __tablename__ = "sector_performance"
+
+    sector_code:   Mapped[str] = mapped_column(String, primary_key=True)
+    sbi_title:     Mapped[Optional[str]] = mapped_column(String)
+    sbi_level:     Mapped[Optional[str]] = mapped_column(String)
+    model_family:  Mapped[Optional[str]] = mapped_column(String)
+    model_type:    Mapped[Optional[str]] = mapped_column(String)
+    feature_groups: Mapped[Optional[str]] = mapped_column(String)
+    champion_mape: Mapped[Optional[float]] = mapped_column(Float)
+    baseline_mape: Mapped[Optional[float]] = mapped_column(Float)
+    improvement:   Mapped[Optional[float]] = mapped_column(Float)
+    r2:            Mapped[Optional[float]] = mapped_column(Float)
+    tier:          Mapped[Optional[str]] = mapped_column(String)
+    refreshed_at:  Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
+
+
 # ---------------------------------------------------------------------------
 # Domain-Specific Baseline Forecaster
 # ---------------------------------------------------------------------------
