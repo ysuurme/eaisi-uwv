@@ -90,6 +90,57 @@ class ModelEvaluationRecord(Base):
     model_blob: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
+class ModelPredictionRecord(Base):  # type: ignore  # Base imported from this module in the actual file
+    """Stores per-row walk-forward predictions for cross-model comparison.
+
+    One row per (run_id, origin_date, horizon).  For the standard 4Q
+    walk-forward with 5 rolling origins, each run produces 20 rows
+    (2 inner + 3 outer origins × 4 horizons each).
+    Enables MASE, per-horizon decay, regime split, and Diebold-Mariano
+    tests in the cross-model comparison notebook, which all require
+    row-level y_true/y_pred (not aggregate metrics).
+
+    The (run_id, model_name) pair links back to ModelEvaluationRecord and
+    to MLflow's runs table for full provenance.  The fold_set column
+    enables honest nested cross-validation: inner-fold rows are used by
+    m_pipeline_loader to PICK the winning variant per sector, outer-fold
+    rows are reported as the honest out-of-sample evaluation.
+    """
+    __tablename__ = "model_predictions"
+
+    # Surrogate key — each prediction row is independent
+    id:          Mapped[int]  = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Provenance — joins to model_evaluations and MLflow runs
+    run_id:      Mapped[str]  = mapped_column(String, index=True)
+    model_name:  Mapped[str]  = mapped_column(String, index=True)
+    sector_code: Mapped[str]  = mapped_column(String, index=True)
+
+    # Walk-forward coordinates
+    origin_date: Mapped[str]  = mapped_column(DateTime)
+    target_date: Mapped[str]  = mapped_column(DateTime, index=True)
+    horizon:     Mapped[int]  = mapped_column(Integer)
+
+    # Nested-CV labelling (added for honest variant selection)
+    # "inner" = early walk-forward origins used by m_pipeline_loader to PICK
+    #           the winning Pipeline variant per sector (variant selection).
+    # "outer" = later walk-forward origins reported as the honest out-of-
+    #           sample evaluation of the chosen variant.  These predictions
+    #           are NEVER inspected during selection.
+    # ml_5_model_evaluation.py splits the rolling origins 40/60 by default —
+    # for n_test_points=20 (5 origins), this is 2 inner + 3 outer origins.
+    # server_default ensures the SQL-level DEFAULT is 'outer' so that
+    # ALTER TABLE migrations and CREATE TABLE produce equivalent DDL.
+    fold_set:    Mapped[str]  = mapped_column(
+        String(8), default="outer", server_default="outer",
+    )
+
+    # Prediction pair
+    y_true:      Mapped[float] = mapped_column(Float)
+    y_pred:      Mapped[float] = mapped_column(Float)
+
+    # Auto-populated insert time
+    timestamp:   Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
 # ---------------------------------------------------------------------------
 # Domain-Specific Baseline Forecaster
