@@ -12,6 +12,17 @@ For each of the (n_test_points // 4) rolling origins:
     3. Forecast 4 quarters ahead (matching the project's 4Q objective)
     4. Collect predictions and actuals
 
+Production-honest exogenous features (no leakage)
+-------------------------------------------------
+By default (``x_future_mode="production"``) the X rows for the forecast
+window are CONSTRUCTED via ``build_future_x`` (defined below): deterministic
+structural columns are extended from the dates, stochastic exogenous columns
+are carried forward from the last observed value.  This matches exactly what
+is available when producing a real forward forecast (Step 7) — models are
+never evaluated with future covariate values they would not have in
+production.  ``x_future_mode="actual"`` restores the old behaviour (actual
+future X rows) for diagnostic comparisons only.
+
 Inner / outer fold split (added for honest variant selection)
 -------------------------------------------------------------
 The walk-forward origins are split chronologically into:
@@ -85,6 +96,93 @@ _INNER_FRACTION = 0.4  # First 40% of origins are inner folds (variant selection
                        # With n_test_points=20 → 5 origins → 2 inner + 3 outer.
 
 
+# ---------------------------------------------------------------------------
+# Production-honest future feature rows (shared by Step 5 eval + Step 7 inference)
+# ---------------------------------------------------------------------------
+# Given the feature matrix observed up to a forecast origin, construct the X
+# rows for the next ``n_steps`` quarters WITHOUT using any future information —
+# exactly what is available when producing a real forecast.  Deterministic
+# structural columns are recomputed from the future quarter-end dates
+# (definitions mirror ``data_loader_gold``); every other (stochastic exogenous)
+# column is carried forward from the last observed row.  Evaluating models under
+# the same rule (ml_5) removes the optimistic bias of feeding actual future
+# covariates during backtests, and Step 7 forecasts under identical conditions.
+
+#: Day count of one quarter (365.25 / 4) — mirrors data_loader_gold.
+QUARTER_DAYS = 91.3125
+
+#: Regime boundaries (quarter end-dates) — mirror data_loader_gold.
+PRE_COVID_END = pd.Timestamp("2019-12-31")  # last pre-COVID quarter end
+COVID_START   = pd.Timestamp("2020-03-31")  # end of Q1 2020
+COVID_END     = pd.Timestamp("2022-12-31")  # end of Q4 2022
+
+
+def build_future_x(x_hist: pd.DataFrame, n_steps: int = 4) -> pd.DataFrame:
+    """Extend a feature matrix ``n_steps`` quarters beyond its last observation.
+
+    Deterministic structural columns (``year``/``quarter``/``trend_index``/
+    ``covid_period``/``post_covid``/``covid_depth``/``recovery_quarters`` and the
+    ``*_x_post_covid`` interactions) are recomputed from the future quarter-end
+    dates; all other columns are carried forward from the last observed row (the
+    honest production stance — future CBS releases are unknown at forecast time).
+
+    Args:
+        x_hist: Feature matrix observed up to the forecast origin.  Must have a
+            DatetimeIndex of quarter-end dates (as produced by Step 3) and at
+            least one row.
+        n_steps: Number of future quarters to construct (default 4 = the
+            project's forecast horizon).
+
+    Returns:
+        DataFrame with ``n_steps`` rows, indexed by the next ``n_steps``
+        quarter-end dates, same columns as ``x_hist`` — deterministic structural
+        columns recomputed, all other columns carried forward.
+    """
+    if x_hist.empty:
+        raise ValueError("x_hist is empty — cannot extend into the future.")
+
+    last_date = pd.Timestamp(x_hist.index[-1])
+    future_idx = pd.DatetimeIndex(
+        pd.date_range(last_date, periods=n_steps + 1, freq="QE")[1:],
+        freq=None,
+        name=x_hist.index.name,
+    )
+
+    # Carry-forward base: repeat the last observed row (production stance for
+    # stochastic exogenous features — future CBS values are unknown).
+    future_x = pd.DataFrame(
+        np.repeat(x_hist.iloc[[-1]].to_numpy(), n_steps, axis=0),
+        columns=x_hist.columns,
+        index=future_idx,
+    )
+
+    # Deterministic structural columns — recomputed from the future dates.
+    deterministic = {
+        "year":              future_idx.year.to_numpy(dtype=float),
+        "quarter":           future_idx.quarter.to_numpy(dtype=float),
+        "covid_period":      ((future_idx >= COVID_START) & (future_idx <= COVID_END)).astype(float),
+        "post_covid":        (future_idx > COVID_END).astype(float),
+        "covid_depth":       np.clip((future_idx - PRE_COVID_END).days / QUARTER_DAYS, 0.0, 12.0),
+        "recovery_quarters": np.clip((future_idx - COVID_END).days / QUARTER_DAYS, 0.0, None),
+    }
+    if "trend_index" in future_x.columns:
+        deterministic["trend_index"] = (
+            float(x_hist["trend_index"].iloc[-1])
+            + np.arange(1, n_steps + 1, dtype=float)
+        )
+    for col, values in deterministic.items():
+        if col in future_x.columns:
+            future_x[col] = values
+
+    # Interactions — recomputed from their (extended) parents.
+    if {"trend_x_post_covid", "trend_index", "post_covid"} <= set(future_x.columns):
+        future_x["trend_x_post_covid"] = future_x["trend_index"] * future_x["post_covid"]
+    if {"quarter_x_post_covid", "quarter", "post_covid"} <= set(future_x.columns):
+        future_x["quarter_x_post_covid"] = future_x["quarter"] * future_x["post_covid"]
+
+    return future_x
+
+
 class ModelEvaluator:
     """Evaluates a trained model via walk-forward refit with nested-CV labelling."""
 
@@ -102,6 +200,7 @@ class ModelEvaluator:
         model_name: str,
         n_test_points: int = 20,
         sector_code: Optional[str] = None,
+        x_future_mode: str = "production",
     ) -> Dict[str, float]:
         """Walk-forward evaluation across n_test_points quarters.
 
@@ -120,6 +219,9 @@ class ModelEvaluator:
             n_test_points: Number of test quarters; must be divisible by _FH_STEPS.
             sector_code: Sector identifier for per-row prediction logging.
                 If None, parsed from the trailing token of ``model_name``.
+            x_future_mode: "production" (default) constructs forecast-window X
+                via ``build_future_x`` (no future covariate leakage);
+                "actual" feeds the actual future X rows (diagnostic only).
 
         Returns:
             {'r2': ..., 'mae': ..., 'rmse': ...} computed on outer folds.
@@ -127,7 +229,8 @@ class ModelEvaluator:
         effective_sector = sector_code or _parse_sector_from_model_name(model_name)
 
         metrics, pred_records, diagnostics = _walk_forward_metrics(
-            fitted_model, x_train, y_train, x_test, y_test, n_test_points, run_id
+            fitted_model, x_train, y_train, x_test, y_test, n_test_points, run_id,
+            x_future_mode=x_future_mode,
         )
         self._persist_record(
             run_id, model_name, effective_sector, metrics, fitted_model, pred_records,
@@ -223,6 +326,7 @@ def _walk_forward_metrics(
     y_test: pd.Series,
     n_test_points: int,
     run_id: str,
+    x_future_mode: str = "production",
 ) -> Tuple[Dict[str, float], List[Dict[str, Any]], Dict[str, float]]:
     """Walk-forward evaluation with inner/outer fold labelling.
 
@@ -270,7 +374,13 @@ def _walk_forward_metrics(
         y_tr  = y_full.iloc[:origin]
         y_fut = y_full.iloc[origin:origin + _FH_STEPS]
         X_tr  = X_full.iloc[:origin]
-        X_fut = X_full.iloc[origin:origin + _FH_STEPS]
+        if x_future_mode == "production":
+            # No leakage: forecast-window X is constructed from information
+            # available at the origin (deterministic structure extended,
+            # exogenous values carried forward) — same rule as Step 7.
+            X_fut = build_future_x(X_tr, n_steps=_FH_STEPS)
+        else:
+            X_fut = X_full.iloc[origin:origin + _FH_STEPS]
 
         estimator = clone(fitted_model)
         y_pred = np.asarray(_predict_origin(estimator, y_tr, X_tr, X_fut)).ravel()
@@ -329,6 +439,8 @@ def _walk_forward_metrics(
 
     # --- Log to MLflow ---
     with mlflow.start_run(run_id=run_id):
+        # Evaluation-honesty lineage: how forecast-window X was supplied.
+        mlflow.log_param("x_future_mode", x_future_mode)
         mlflow.log_metrics({
             # Headline = OUTER FOLDS (honest).  MAPE is the primary champion
             # gate metric (ADR-001) and the leading indicator in the MLflow UI.

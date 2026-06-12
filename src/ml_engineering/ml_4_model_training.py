@@ -55,6 +55,9 @@ def _base_estimator_name(estimator: Any) -> str:
     (e.g. ``SectorQuarterRollingMean`` for the baseline).
     """
     inner = getattr(estimator, "estimator", None)  # sktime reducer → wrapped sklearn est
+    if inner is None:
+        # QuarterlyPeriodForecaster (and similar adapters) → wrapped forecaster
+        inner = getattr(estimator, "forecaster", None)
     target = inner if inner is not None else estimator
     steps = getattr(target, "steps", None)          # sklearn Pipeline → final step
     if steps:

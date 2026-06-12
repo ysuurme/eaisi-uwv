@@ -13,7 +13,11 @@ import numpy as np
 import pandas as pd
 
 from src.ml_engineering.model_configs import SectorQuarterRollingMean
-from src.ml_engineering.ml_5_model_evaluation import ModelEvaluator
+from src.ml_engineering.ml_5_model_evaluation import (
+    QUARTER_DAYS,
+    ModelEvaluator,
+    build_future_x,
+)
 
 
 def _make_series(n: int, start: str = "2015-01-01") -> tuple:
@@ -174,6 +178,149 @@ class TestModelEvaluation(unittest.TestCase):
         self.assertEqual(
             logged["n_inner_predictions"] + logged["n_outer_predictions"], 8
         )
+
+
+class TestProductionHonestFutureX(unittest.TestCase):
+    """x_future_mode wiring: forecast-window X must come from build_future_x
+    by default (no future-covariate leakage) and from the actual rows only in
+    the explicit diagnostic mode."""
+
+    def setUp(self):
+        self.x_train, self.y_train = _make_series(32)
+        self.x_test,  self.y_test  = _make_series(8, start="2023-01-01")
+
+    def _evaluate(self, mock_bfx, **kwargs):
+        baseline = SectorQuarterRollingMean()
+        baseline.fit(self.x_train, self.y_train)
+        evaluator = ModelEvaluator(session=MagicMock())
+        return evaluator.evaluate(
+            run_id="run_future_x",
+            fitted_model=baseline,
+            x_train=self.x_train,
+            y_train=self.y_train,
+            x_test=self.x_test,
+            y_test=self.y_test,
+            model_name="test_future_x",
+            n_test_points=8,  # 2 origins × 4Q
+            **kwargs,
+        )
+
+    @patch("src.ml_engineering.ml_5_model_evaluation.build_future_x")
+    @patch("src.ml_engineering.ml_5_model_evaluation.mlflow")
+    def test_production_mode_constructs_future_x(self, mock_mlflow, mock_bfx):
+        mock_mlflow.start_run.return_value.__enter__.return_value = MagicMock()
+        # Shape-compatible stand-in: last 4 observed rows
+        mock_bfx.side_effect = lambda x_hist, n_steps: x_hist.iloc[-n_steps:]
+
+        self._evaluate(mock_bfx)  # default mode = "production"
+
+        self.assertEqual(mock_bfx.call_count, 2)  # one call per origin
+        mock_mlflow.log_param.assert_any_call("x_future_mode", "production")
+
+    @patch("src.ml_engineering.ml_5_model_evaluation.build_future_x")
+    @patch("src.ml_engineering.ml_5_model_evaluation.mlflow")
+    def test_actual_mode_uses_observed_rows(self, mock_mlflow, mock_bfx):
+        mock_mlflow.start_run.return_value.__enter__.return_value = MagicMock()
+
+        self._evaluate(mock_bfx, x_future_mode="actual")
+
+        mock_bfx.assert_not_called()
+        mock_mlflow.log_param.assert_any_call("x_future_mode", "actual")
+
+
+# ---------------------------------------------------------------------------
+# build_future_x — production-honest future feature construction (Step 5/7 shared)
+# ---------------------------------------------------------------------------
+
+def _hist_frame(start: str, periods: int, trend_start: float = 1.0) -> pd.DataFrame:
+    """History frame with the full structural column set + one exogenous col."""
+    idx = pd.DatetimeIndex(pd.date_range(start, periods=periods, freq="QE"), freq=None)
+    post_covid = (idx > pd.Timestamp("2022-12-31")).astype(float)
+    trend = np.arange(trend_start, trend_start + periods, dtype=float)
+    return pd.DataFrame(
+        {
+            "year": idx.year.astype(float),
+            "quarter": idx.quarter.astype(float),
+            "trend_index": trend,
+            "covid_period": ((idx >= pd.Timestamp("2020-03-31"))
+                             & (idx <= pd.Timestamp("2022-12-31"))).astype(float),
+            "post_covid": post_covid,
+            "covid_depth": np.clip((idx - pd.Timestamp("2019-12-31")).days / QUARTER_DAYS, 0, 12),
+            "recovery_quarters": np.clip((idx - pd.Timestamp("2022-12-31")).days / QUARTER_DAYS, 0, None),
+            "trend_x_post_covid": trend * post_covid,
+            "quarter_x_post_covid": idx.quarter.astype(float) * post_covid,
+            "exog": np.linspace(10.0, 20.0, periods),
+        },
+        index=idx,
+    )
+
+
+class TestBuildFutureX(unittest.TestCase):
+    """Deterministic structural columns are recomputed from the future dates,
+    stochastic exogenous columns carried forward, and regime boundaries honoured
+    even when the forecast window crosses them."""
+
+    def test_deterministic_extension_and_carry_forward(self):
+        """From 2025Q3: dates, year/quarter, trend continue; exog carried forward."""
+        hist = _hist_frame("2023-03-31", periods=11)  # 2023Q1 … 2025Q3
+        fut = build_future_x(hist, n_steps=4)
+
+        expected_dates = pd.DatetimeIndex(
+            ["2025-12-31", "2026-03-31", "2026-06-30", "2026-09-30"]
+        )
+        self.assertTrue((fut.index == expected_dates).all())
+        self.assertEqual(list(fut.columns), list(hist.columns))
+
+        self.assertEqual(list(fut["quarter"]), [4.0, 1.0, 2.0, 3.0])
+        self.assertEqual(list(fut["year"]), [2025.0, 2026.0, 2026.0, 2026.0])
+        last_trend = hist["trend_index"].iloc[-1]
+        self.assertEqual(list(fut["trend_index"]), [last_trend + i for i in (1, 2, 3, 4)])
+
+        # Stochastic exogenous column: strict carry-forward of the last value
+        self.assertTrue((fut["exog"] == hist["exog"].iloc[-1]).all())
+
+        # Post-COVID regime: flags constant, ramps continue
+        self.assertTrue((fut["covid_period"] == 0.0).all())
+        self.assertTrue((fut["post_covid"] == 1.0).all())
+        self.assertTrue((fut["covid_depth"] == 12.0).all())
+        self.assertTrue(fut["recovery_quarters"].is_monotonic_increasing)
+
+        # Interactions recomputed from the extended parents
+        self.assertTrue((fut["trend_x_post_covid"] == fut["trend_index"]).all())
+        self.assertTrue((fut["quarter_x_post_covid"] == fut["quarter"]).all())
+
+    def test_regime_boundary_crossing(self):
+        """Origin at 2022Q4 (COVID end): the future window must flip the regime
+        flags — carry-forward of regime columns would be wrong here."""
+        hist = _hist_frame("2020-03-31", periods=12)  # 2020Q1 … 2022Q4 (all COVID)
+        self.assertTrue((hist["covid_period"] == 1.0).all())
+
+        fut = build_future_x(hist, n_steps=4)  # 2023Q1 … 2023Q4
+
+        self.assertTrue((fut["covid_period"] == 0.0).all())
+        self.assertTrue((fut["post_covid"] == 1.0).all())
+        self.assertTrue((fut["covid_depth"] == 12.0).all())
+        # recovery ramp starts: 2023-03-31 is 90 days past COVID end
+        self.assertAlmostEqual(fut["recovery_quarters"].iloc[0], 90 / QUARTER_DAYS, places=6)
+        self.assertTrue(fut["recovery_quarters"].is_monotonic_increasing)
+        # Interactions become active even though they were 0 throughout history
+        self.assertTrue((fut["trend_x_post_covid"] == fut["trend_index"]).all())
+
+    def test_subset_of_structural_columns(self):
+        """Frames missing some structural columns are extended without error;
+        unknown columns are carried forward."""
+        idx = pd.DatetimeIndex(pd.date_range("2024-03-31", periods=6, freq="QE"), freq=None)
+        hist = pd.DataFrame({"quarter": idx.quarter.astype(float), "some_feature": 7.5}, index=idx)
+
+        fut = build_future_x(hist, n_steps=4)
+
+        self.assertEqual(list(fut.columns), ["quarter", "some_feature"])
+        self.assertTrue((fut["some_feature"] == 7.5).all())
+        self.assertEqual(len(fut), 4)
+
+    def test_empty_history_raises(self):
+        with self.assertRaises(ValueError):
+            build_future_x(pd.DataFrame(), n_steps=4)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,11 @@ from sklearn.ensemble import (
 from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sktime.forecasting.base import BaseForecaster
 from sktime.forecasting.compose import make_reduction
+from sktime.forecasting.ets import AutoETS
+from sktime.forecasting.naive import NaiveForecaster
+from sktime.forecasting.trend import STLForecaster
 from sqlalchemy import String, Float, Integer, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -311,6 +315,70 @@ class PLS1D(PLSRegression):
         return y_pred
 
 
+class QuarterlyPeriodForecaster(BaseForecaster):
+    """Runs a wrapped sktime forecaster on a quarterly PeriodIndex.
+
+    The pipeline hands sktime forecasters a DatetimeIndex with ``freq=None``
+    (set deliberately in Step 3).  Reducer-style forecasters handle that fine,
+    but decomposition-based estimators (``STLForecaster``, ``Deseasonalizer``,
+    ``Detrender``) require an index with frequency information and fail with
+    "You must pass a freq argument" / "frequency is missing".
+
+    This wrapper converts y/X to a quarterly ``PeriodIndex`` before delegating
+    to the wrapped forecaster, and converts predictions back to normalized
+    quarter-end timestamps so the rest of the pipeline (walk-forward evaluation,
+    prediction persistence, pyfunc serialization) sees the same index convention
+    as every other estimator.
+
+    It is a regular sktime forecaster: ``get_params``/``set_params`` expose the
+    wrapped forecaster as the ``forecaster`` parameter, so grid search reaches
+    inner hyperparameters via ``forecaster__<param>`` keys and
+    ``sklearn.base.clone`` / pickling work unchanged.
+
+    Args:
+        forecaster: Any sktime forecaster requiring a frequency-aware index
+            (e.g. ``STLForecaster`` or a ``TransformedTargetForecaster`` with
+            ``Deseasonalizer``/``Detrender`` steps).
+    """
+
+    _tags = {
+        "scitype:y": "univariate",
+        "y_inner_mtype": "pd.Series",
+        "X_inner_mtype": "pd.DataFrame",
+        "ignores-exogeneous-X": False,
+        "requires-fh-in-fit": False,
+        "handles-missing-data": False,
+        "capability:pred_int": False,
+    }
+
+    def __init__(self, forecaster: BaseForecaster):
+        self.forecaster = forecaster
+        super().__init__()
+
+    def _fit(self, y: pd.Series, X: Optional[pd.DataFrame] = None, fh=None):
+        self.forecaster_ = self.forecaster.clone()
+        self.forecaster_.fit(y=_to_period(y), X=_to_period(X), fh=fh)
+        return self
+
+    def _predict(self, fh, X: Optional[pd.DataFrame] = None) -> pd.Series:
+        y_pred = self.forecaster_.predict(fh=fh, X=_to_period(X))
+        if isinstance(y_pred.index, pd.PeriodIndex):
+            y_pred = y_pred.copy()
+            y_pred.index = pd.DatetimeIndex(
+                y_pred.index.to_timestamp(how="end").normalize(), freq=None
+            )
+        return y_pred
+
+
+def _to_period(data):
+    """Return a copy of ``data`` re-indexed on a quarterly PeriodIndex."""
+    if data is None:
+        return None
+    converted = data.copy()
+    converted.index = pd.DatetimeIndex(converted.index).to_period("Q")
+    return converted
+
+
 # ---------------------------------------------------------------------------
 # Feature Catalog — named groups of features with source metadata
 # ---------------------------------------------------------------------------
@@ -537,6 +605,14 @@ class ModelConfiguration:
         SectorQuarterRollingMean — rolling 3-year same-quarter mean per SBI sector.
         Domain-specific, interpretable, and leakage-free benchmark.
 
+    Statistical forecasters (autoets / stl_ets):
+        Univariate sktime-native estimators — the model families that won the
+        notebook comparison study (STL+ETS mean MASE 0.93, AutoETS 1.17 vs
+        feature-pipeline 2.36 across 39 sectors).  They consume the target
+        history only: feature_groups=["structural_only"] passes structural X
+        which the estimators ignore.  STL-based composites require a
+        PeriodIndex and are wrapped in QuarterlyPeriodForecaster.
+
     Reducers (sktime make_reduction):
         Wraps sklearn regressors into recursive lag-window forecasters.
         For linear-family models (linear / ridge / elasticnet / structural_linear)
@@ -557,6 +633,39 @@ class ModelConfiguration:
             param_grid={},
             feature_groups=None,  # uses sbi_col + quarter_col from X; no catalog groups needed
             description="Rolling 3-year same-quarter mean per SBI sector. No look-ahead bias.",
+        ),
+        "autoets": ModelExperiment(
+            name="AutoETS_Stat",
+            estimator=AutoETS(sp=4),
+            # List-of-dicts grid: only VALID ETS combinations (no damped trend
+            # without a trend; no additive error with multiplicative seasonal).
+            # 11 combos — covers the per-sector winners of the notebook study
+            # (MAdM / MNM / MNN / MNA).  Multiplicative forms require y > 0,
+            # which holds for sick-leave percentages (≈ 1.4–10.1).
+            param_grid=[
+                {"error": ["add"], "trend": [None, "add"], "seasonal": [None, "add"]},
+                {"error": ["mul"], "trend": [None], "seasonal": [None, "add", "mul"]},
+                {"error": ["mul"], "trend": ["add"], "damped_trend": [False, True],
+                 "seasonal": ["add", "mul"]},
+            ],
+            feature_groups=["structural_only"],
+            description="Univariate ETS (statsmodels) — sktime-native equivalent of the notebook AutoETS winner; X ignored.",
+        ),
+        "stl_ets": ModelExperiment(
+            name="STLETS_Stat",
+            estimator=QuarterlyPeriodForecaster(STLForecaster(
+                sp=4,
+                forecaster_trend=AutoETS(error="add", trend="add", damped_trend=True, sp=1),
+                forecaster_seasonal=NaiveForecaster(strategy="last", sp=4),
+                forecaster_resid=AutoETS(error="add", sp=1),
+            )),
+            param_grid={
+                "forecaster__seasonal": [7, 13],
+                "forecaster__robust": [False, True],
+                "forecaster__forecaster_trend__damped_trend": [False, True],
+            },
+            feature_groups=["structural_only"],
+            description="STL decomposition (quarterly) + ETS trend/residual components — sktime-native STL+ETS, the notebook comparison winner.",
         ),
         "structural_linear": ModelExperiment(
             name="StructuralLinear",
