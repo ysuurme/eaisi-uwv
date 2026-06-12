@@ -106,8 +106,50 @@ class TestModelEvaluation(unittest.TestCase):
         mock_session.merge.assert_called_once()
 
     @patch("src.ml_engineering.ml_5_model_evaluation.mlflow")
-    def test_n_eval_points_logged(self, mock_mlflow):
-        """n_eval_points and n_eval_origins must be logged to MLflow."""
+    def test_evaluate_returns_logs_and_persists_mape(self, mock_mlflow):
+        """Tracer bullet: MAPE is computed on outer folds, returned by the
+        public evaluate(), logged as an MLflow metric, and persisted on the
+        evaluation record."""
+        mock_mlflow.start_run.return_value.__enter__.return_value = MagicMock()
+
+        baseline = SectorQuarterRollingMean()
+        baseline.fit(self.x_train, self.y_train)
+
+        mock_session = MagicMock()
+        evaluator = ModelEvaluator(session=mock_session)
+        metrics = evaluator.evaluate(
+            run_id="run_mape",
+            fitted_model=baseline,
+            x_train=self.x_train,
+            y_train=self.y_train,
+            x_test=self.x_test,
+            y_test=self.y_test,
+            model_name="test_mape",
+            n_test_points=8,
+        )
+
+        # (1) returned in the public metrics dict, finite, on outer folds
+        self.assertIn("mape", metrics)
+        self.assertIsInstance(metrics["mape"], float)
+        self.assertTrue(np.isfinite(metrics["mape"]))
+
+        # (2) logged to MLflow as a run metric
+        logged = mock_mlflow.log_metrics.call_args[0][0]
+        self.assertIn("mean_absolute_percentage_error", logged)
+        self.assertEqual(logged["mean_absolute_percentage_error"], metrics["mape"])
+
+        # (3) persisted on the ModelEvaluationRecord handed to session.merge
+        persisted = mock_session.merge.call_args[0][0]
+        self.assertTrue(hasattr(persisted, "mape"))
+        self.assertIsInstance(persisted.mape, float)
+
+    @patch("src.ml_engineering.ml_5_model_evaluation.mlflow")
+    def test_eval_origin_counts_logged(self, mock_mlflow):
+        """Walk-forward origin/prediction provenance counts are logged to MLflow.
+
+        ml_5 logs the inner/outer breakdown (not a single n_eval_points key).
+        With n_test_points=8 → 2 origins (1 inner + 1 outer) → 8 predictions.
+        """
         mock_mlflow.start_run.return_value.__enter__.return_value = MagicMock()
 
         baseline = SectorQuarterRollingMean()
@@ -126,10 +168,12 @@ class TestModelEvaluation(unittest.TestCase):
         )
 
         logged = mock_mlflow.log_metrics.call_args[0][0]
-        self.assertIn("n_eval_points", logged)
-        self.assertIn("n_eval_origins", logged)
-        self.assertEqual(logged["n_eval_points"], 8)
-        self.assertEqual(logged["n_eval_origins"], 2)
+        self.assertIn("n_inner_origins", logged)
+        self.assertIn("n_outer_origins", logged)
+        self.assertEqual(logged["n_inner_origins"] + logged["n_outer_origins"], 2)
+        self.assertEqual(
+            logged["n_inner_predictions"] + logged["n_outer_predictions"], 8
+        )
 
 
 if __name__ == "__main__":

@@ -50,56 +50,17 @@ def _configure_mlflow(db_eval_path: Path) -> str:
 
 
 def _ensure_eval_db(engine) -> None:
-    """Creates evaluation tables, enables WAL mode, and validates schema.
+    """Creates the evaluation tables from the ORM and enables WAL mode.
 
-    On first run the per-row prediction table is created from scratch.
-
-    SCHEMA CHECK (fail-fast):
-        If ``model_predictions`` already exists but is missing the ``fold_set``
-        column required by the nested-CV evaluator (ml_5_model_evaluation.py),
-        this function raises ``RuntimeError`` with explicit migration SQL.
-        ``Base.metadata.create_all`` is a no-op for existing tables — it does
-        NOT add columns that were introduced after the table's first creation.
-        So we must check explicitly.
+    The eval DB is local and disposable (rebuilt from scratch), so there is no
+    in-place migration: ``Base.metadata.create_all`` builds every table from
+    the current ORM definitions on a fresh database.  If a stale eval DB from a
+    previous schema lingers, delete ``data/4_eval/eval_data.db*`` and re-run.
     """
     with engine.connect() as conn:
         conn.execute(text("PRAGMA journal_mode=WAL"))
         conn.commit()
     Base.metadata.create_all(engine)
-
-    # ── Schema check: enforce fold_set column on model_predictions ──────
-    insp = sa_inspect(engine)
-    if "model_predictions" in insp.get_table_names():
-        existing_cols = {c["name"] for c in insp.get_columns("model_predictions")}
-        if "fold_set" not in existing_cols:
-            db_path = engine.url.database  # e.g. "data/4_eval/eval_data.db"
-            raise RuntimeError(
-                "\n"
-                "═════════════════════════════════════════════════════════════════════\n"
-                "  SCHEMA MISMATCH — model_predictions lacks 'fold_set' column\n"
-                "═════════════════════════════════════════════════════════════════════\n"
-                "  The updated ml_5_model_evaluation.py writes inner/outer fold labels\n"
-                "  via a 'fold_set' column.  Your existing model_predictions table was\n"
-                "  created before this column existed and SQLAlchemy's create_all() is\n"
-                "  a no-op for existing tables.\n"
-                "\n"
-                "  Apply ONE of these migrations and re-run:\n"
-                "\n"
-                "  (A) DROP + recreate (simplest; deletes old predictions):\n"
-                f"        sqlite3 {db_path}\n"
-                "        DROP TABLE model_predictions;\n"
-                "\n"
-                "  (B) ALTER TABLE (preserves old rows, marks them as 'outer'):\n"
-                f"        sqlite3 {db_path}\n"
-                "        ALTER TABLE model_predictions\n"
-                "        ADD COLUMN fold_set VARCHAR(8) NOT NULL DEFAULT 'outer';\n"
-                "\n"
-                "  Note: under option (B), old rows will NOT have inner-fold predictions,\n"
-                "  so the loader's per_sector_honest mode will treat them as ineligible\n"
-                "  for variant selection (correct behaviour — only re-runs with the new\n"
-                "  ml_5 will produce eligible inner-fold data).\n"
-                "═════════════════════════════════════════════════════════════════════\n"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +73,7 @@ def run_pipeline(
     feature_groups: Optional[List[str]] = None,
     sbi_filter_col: Optional[str] = None,
     n_test_points: int = 20,
-    threshold_r2: float = 0.2,
+    r2_floor: Optional[float] = None,
 ) -> None:
     """MLOps Level 0: Manual ML Pipeline.
 
@@ -126,8 +87,9 @@ def run_pipeline(
         n_test_points: Number of quarterly evaluation points for walk-forward
             assessment.  Must be divisible by 4.  Default 20 = 5 origins × 4Q.
             ml_5 splits these into 2 inner + 3 outer origins for nested CV.
-        threshold_r2: Minimum R² score to pass the quality gate.  Note: with
-            the inner/outer split, R² is now computed on OUTER folds only.
+        r2_floor: Optional secondary R² floor for the quality gate.  None
+            (default) disables it — promotion is decided purely by the MAPE
+            champion/challenger gate (ADR-001).  R² is computed on OUTER folds.
     """
     # --- Select Estimator ---
     config = ModelConfiguration.get(experiment_key)
@@ -138,7 +100,12 @@ def run_pipeline(
         if sbi_filter_col else "T001081"
     )
     experiment_name = f"{dataset_id}_SickLeave_4Q"
+    # Eval-store / run identifier — keeps the {family}_{sector} convention that
+    # model_predictions + m_pipeline_loader depend on (CONTEXT.md C3).
     model_name = f"{config.name}_{sector_label}"
+    # MLflow registry key — sector-only, so all families compete for ONE
+    # champion per sector (ADR-002).  Family is carried as a version tag.
+    registered_model_name = f"{experiment_name}_{sector_label}"
 
     f_log(
         f"Pipeline start | Model: {config.name} | Sector: {sector_label} | Table: {gold_table}",
@@ -223,10 +190,15 @@ def run_pipeline(
             f_log("Step 6 | Validating model quality...", c_type="process")
             validator = ModelValidator()
             passed = validator.validate_and_register(
-                run_id=run_id, model_name=model_name, metrics=metrics,
-                threshold_r2=threshold_r2,
+                run_id=run_id,
+                registered_model_name=registered_model_name,
+                metrics=metrics,
+                model_family=config.name,
+                sector_code=sector_label,
+                r2_floor=r2_floor,
                 tags={"data_source": gold_table, "sector": sector_label, "status": "candidate"},
-                description=f"Model {model_name} | sector={sector_label} | 4Q ahead.",
+                description=f"{config.name} | sector={sector_label} | 4Q ahead.",
+                session=session,
             )
 
             if passed:
@@ -245,7 +217,7 @@ def run_sector_sweep(
     gold_table: str = "master_data_ml_preprocessed",
     feature_groups: Optional[List[str]] = None,
     n_test_points: int = 20,
-    threshold_r2: float = 0.2,
+    r2_floor: Optional[float] = None,
 ) -> None:
     """Runs the pipeline for every OHE SBI sector column found in the gold table.
 
@@ -258,7 +230,7 @@ def run_sector_sweep(
         experiment_key: Key in ModelConfiguration catalog.
         gold_table: Name of the preprocessed table in the gold feature store.
         feature_groups: Named feature groups from FEATURE_CATALOG.  None = all.
-        threshold_r2: Minimum R² to pass the quality gate per sector.
+        r2_floor: Optional secondary R² floor per sector (None = MAPE gate only).
     """
     discovery_engine = create_engine(f"sqlite:///{DIR_DB_GOLD.as_posix()}")
     columns = sa_inspect(discovery_engine).get_columns(gold_table)
@@ -285,7 +257,7 @@ def run_sector_sweep(
                 sbi_filter_col=sbi_col,
                 feature_groups=feature_groups,
                 n_test_points=n_test_points,
-                threshold_r2=threshold_r2,
+                r2_floor=r2_floor,
             )
         except Exception as exc:
             # Log and continue — one bad sector should not abort the sweep
@@ -299,7 +271,7 @@ if __name__ == "__main__":
     setup_logging()
 
     # All-industry mode (default):
-    run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed", threshold_r2=0.0)
+    run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed")
     # Sector-specific mode (example):
     # run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed",
-    #              sbi_filter_col="BedrijfskenmerkenSBI2008_301000", threshold_r2=0.0)
+    #              sbi_filter_col="BedrijfskenmerkenSBI2008_301000")

@@ -66,7 +66,7 @@ uv run mlflow ui --backend-store-uri sqlite:///data/4_eval/eval_data.db
 
 🌐 **Open**: [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
-All runs land in the `master_SickLeave_4Q` experiment, tagged with `sector` and `forecast_horizon=4Q` for easy cross-sector comparison.
+All runs land in the `master_SickLeave_4Q` experiment, tagged with `sector` and `forecast_horizon=4Q` for easy cross-sector comparison. **MAPE** is the primary metric and quality gate; each sector has one registered model whose `@prod` alias is its current champion (the lowest-MAPE model seen so far).
 
 ### 4. Run Tests
 ```bash
@@ -291,9 +291,9 @@ Every pipeline run operates on exactly one quarterly time series (1 row per quar
 - Logs `model_class`, `train_rows`, `feature_count`, `sector`, `forecast_horizon` to MLflow.
 
 **5. Model Evaluation (`ml_5_model_evaluation.py`)**
-- **Baseline**: `mlflow.models.evaluate` (native MLflow observability — SHAP, residuals).
-- **sktime**: `ForecastingHorizon(y_test.index)` → `.predict(fh, X)` → manual `mlflow.log_metrics`.
-- Computes R², MAE, RMSE on the 4-quarter held-out test set.
+- Walk-forward (rolling-origin) evaluation with nested inner/outer folds; headline metrics are computed on the honest **outer** folds.
+- Computes **MAPE** (primary), R², MAE, RMSE on the 4-quarter-ahead forecasts and logs them to MLflow. Per-row predictions are persisted for cross-model comparison.
 
 **6. Model Validation & Registry (`ml_6_model_validation.py`)**
-- Quality gate against R² threshold. Promotes passing models to MLflow Registry with `@prod` alias.
+- **MAPE champion/challenger gate**: one registered model per sector (sector-keyed name). A challenger is promoted to `@prod` only if its MAPE is finite and strictly lower than the incumbent champion's MAPE — or seeded unconditionally when no champion exists yet. Losing runs stay diagnosable (`passed_gate=false`) but are not registered, so the registry only grows on genuine improvement.
+- R² is recorded alongside (optional `r2_floor`, disabled by default). The promoted version is tagged with `mape` / `r2` / `model_family`, so each registered model's accuracy is readable straight from the MLflow UI.

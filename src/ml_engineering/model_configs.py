@@ -42,7 +42,7 @@ from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sktime.forecasting.compose import make_reduction
-from sqlalchemy import String, Float, Integer, LargeBinary, DateTime
+from sqlalchemy import String, Float, Integer, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -85,9 +85,9 @@ class ModelEvaluationRecord(Base):
     model_name: Mapped[Optional[str]] = mapped_column(String)
     r2: Mapped[Optional[float]] = mapped_column(Float)
     mae: Mapped[Optional[float]] = mapped_column(Float)
+    mape: Mapped[Optional[float]] = mapped_column(Float)
     rmse: Mapped[Optional[float]] = mapped_column(Float)
     passed_gate: Mapped[Optional[int]] = mapped_column(Integer)
-    model_blob: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     timestamp: Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
 class ModelPredictionRecord(Base):  # type: ignore  # Base imported from this module in the actual file

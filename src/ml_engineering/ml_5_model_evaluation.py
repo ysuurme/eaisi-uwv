@@ -55,14 +55,18 @@ REQUIRES
   missing.
 """
 import math
-import pickle
 from typing import Any, Dict, List, Optional, Tuple
 
 import mlflow
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_absolute_percentage_error,
+    mean_squared_error,
+    r2_score,
+)
 from sktime.forecasting.base import ForecastingHorizon
 from sqlalchemy.orm import Session
 
@@ -149,18 +153,16 @@ class ModelEvaluator:
         pred_records: List[Dict[str, Any]],
     ) -> None:
         # --- Aggregate evaluation record (outer-fold honest metrics) ---
+        # Model artifacts live in MLflow (the single model store) — the eval
+        # DB holds metrics/analytics only.  No pickled blob is persisted here.
         record = ModelEvaluationRecord(
             run_id=run_id,
             model_name=model_name,
             r2=metrics["r2"],
             mae=metrics["mae"],
+            mape=metrics["mape"],
             rmse=metrics["rmse"],
             passed_gate=0,  # Step 6 updates this after the quality gate check
-            model_blob=(
-                pickle.dumps(fitted_model)
-                if isinstance(fitted_model, SectorQuarterRollingMean)
-                else None  # sktime blobs are stored as pyfunc artifacts by Step 4
-            ),
         )
         self.session.merge(record)
 
@@ -300,6 +302,7 @@ def _walk_forward_metrics(
         yp = np.array(outer_y_pred)
         r2   = float(r2_score(yt, yp))
         mae  = float(mean_absolute_error(yt, yp))
+        mape = float(mean_absolute_percentage_error(yt, yp))
         rmse = float(np.sqrt(mean_squared_error(yt, yp)))
     elif inner_y_true:
         # CV truncated before reaching outer folds — fall back with a warning
@@ -312,9 +315,10 @@ def _walk_forward_metrics(
         yp = np.array(inner_y_pred)
         r2   = float(r2_score(yt, yp))
         mae  = float(mean_absolute_error(yt, yp))
+        mape = float(mean_absolute_percentage_error(yt, yp))
         rmse = float(np.sqrt(mean_squared_error(yt, yp)))
     else:
-        r2 = mae = rmse = float("nan")
+        r2 = mae = mape = rmse = float("nan")
         f_log("Walk-forward produced no predictions at all.", c_type="error")
 
     # --- Inner-fold diagnostic MAE ---
@@ -326,7 +330,9 @@ def _walk_forward_metrics(
     # --- Log to MLflow ---
     with mlflow.start_run(run_id=run_id):
         mlflow.log_metrics({
-            # Headline = OUTER FOLDS (honest)
+            # Headline = OUTER FOLDS (honest).  MAPE is the primary champion
+            # gate metric (ADR-001) and the leading indicator in the MLflow UI.
+            "mean_absolute_percentage_error": mape,
             "r2_score":                r2,
             "mean_absolute_error":     mae,
             "root_mean_squared_error": rmse,
@@ -343,7 +349,7 @@ def _walk_forward_metrics(
         "n_inner":    n_inner_actual,
         "n_outer":    n_outer_actual,
     }
-    return {"r2": r2, "mae": mae, "rmse": rmse}, pred_records, diagnostics
+    return {"r2": r2, "mae": mae, "mape": mape, "rmse": rmse}, pred_records, diagnostics
 
 
 def _predict_origin(
