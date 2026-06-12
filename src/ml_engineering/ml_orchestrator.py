@@ -160,7 +160,7 @@ def run_pipeline(
             fitted_model, run_id = trainer.train(
                 experiment=config, x_train=x_train, y_train=y_train,
                 run_name=f"{config.name}_{sector_label}",
-                lineage={**lineage, "sector": sector_label},
+                lineage={**lineage, "sector": sector_label, "experiment_key": experiment_key},
             )
 
             # --- Step 5: Model Evaluation ---
