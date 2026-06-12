@@ -55,13 +55,15 @@ uv run main.py master_data_ml_preprocessed linear - compensation,working_conditi
 uv run main.py --refresh-data
 ```
 
-**Available model keys:** `baseline`, `linear`, `random_forest`, `gradient_boosting`, `hist_gradient_boosting`
+**Available model keys:** `baseline`, `structural_linear`, `linear`, `ridge`, `elasticnet`, `random_forest`, `gradient_boosting`, `hist_gbr`, `pls`
 
 ### 3. Track Results (MLflow)
 The pipeline is "Zero-Artifact"; all results are stored in `data/4_eval/eval_data.db`. Launch the UI to view metrics, tuning grids, and model signatures.
 
 ```bash
 uv run mlflow ui --backend-store-uri sqlite:///data/4_eval/eval_data.db
+# or the project script (see [project.scripts] in pyproject.toml):
+uv run mlflow-ui
 ```
 
 🌐 **Open**: [http://127.0.0.1:5000](http://127.0.0.1:5000)
@@ -257,10 +259,16 @@ Every pipeline run operates on exactly one quarterly time series (1 row per quar
 | Key | Estimator | Tunable |
 |-----|-----------|---------|
 | `baseline` | `SectorQuarterRollingMean(n_years=3)` | No |
-| `linear` | `make_reduction(LinearRegression, window_length=12)` | `window_length` |
-| `random_forest` | `make_reduction(RandomForestRegressor, window_length=12)` | `window_length`, `n_estimators`, `max_depth` |
+| `structural_linear` | `make_reduction(Pipeline[Scaler→Ridge], window_length=4)` | `window_length`, `alpha` |
+| `linear` | `make_reduction(Pipeline[Scaler→LinearRegression], window_length=4)` | `window_length` |
+| `ridge` | `make_reduction(Pipeline[Scaler→Ridge], window_length=4)` | `window_length`, `alpha` |
+| `elasticnet` | `make_reduction(Pipeline[Scaler→ElasticNet], window_length=4)` | `window_length`, `alpha`, `l1_ratio` |
+| `random_forest` | `make_reduction(RandomForestRegressor, window_length=12)` | `window_length`, `n_estimators`, `max_depth`, `min_samples_leaf` |
 | `gradient_boosting` | `make_reduction(GradientBoostingRegressor, window_length=12)` | `window_length`, `n_estimators`, `learning_rate` |
-| `hist_gradient_boosting` | `make_reduction(HistGradientBoostingRegressor, window_length=12)` | `window_length`, `learning_rate`, `max_iter` |
+| `hist_gbr` | `make_reduction(HistGradientBoostingRegressor, window_length=12)` | `window_length`, `max_iter`, `max_depth`, `learning_rate`, `min_samples_leaf` |
+| `pls` | `make_reduction(Pipeline[Scaler→PLS1D], window_length=4)` | `window_length`, `n_components` |
+
+Linear-family estimators (`structural_linear`, `linear`, `ridge`, `elasticnet`, `pls`) are wrapped in a `StandardScaler` pipeline; tree-family estimators are scale-invariant and are not.
 
 **`SectorQuarterRollingMean`**: Domain-specific baseline. For each quarter Q, predicts the mean of Q from the previous 3 years using `shift(1).rolling_mean(window_size=3, min_samples=3).over([quarter])`. Requires 3 full prior-year observations before producing a prediction (matching the CBS notebook approach). Because `shift(1)` within the same-quarter group equals a 1-year shift, this is inherently a 4-quarter-ahead forecast.
 
@@ -286,9 +294,9 @@ Every pipeline run operates on exactly one quarterly time series (1 row per quar
 - Outputs `X_train, X_test, y_train, y_test` + lineage metadata.
 
 **4. Model Training (`ml_4_model_training.py`)**
-- **Baseline path** (`SectorQuarterRollingMean`): standard sklearn `.fit(X, y)`. Logged via `mlflow.sklearn.log_model`.
-- **sktime path** (all others): `.fit(y=y_train, X=X_numeric)`. Tuned via `ForecastingGridSearchCV` + `ExpandingWindowSplitter`. Serialized as pickle artifact.
-- Logs `model_class`, `train_rows`, `feature_count`, `sector`, `forecast_horizon` to MLflow.
+- **Baseline path** (`SectorQuarterRollingMean`): standard sklearn `.fit(X, y)`, logged via `mlflow.sklearn.log_model`.
+- **sktime path** (all others): `.fit(y=y_train, X=X_numeric)`, tuned via `ForecastingGridSearchCV` + `ExpandingWindowSplitter`, wrapped in a pyfunc for registry compatibility.
+- Logs full **reproducibility lineage**: `experiment_key`, `model_name`, `model_type` (the underlying algorithm, unwrapped from the sktime reducer), `feature_groups`, `active_preset`, `best_params`, `param_grid`, a `feature_set_hash` tag, and a `features.json` artifact — so any run is reproducible and two runs of the same estimator are distinguishable from MLflow metadata alone.
 
 **5. Model Evaluation (`ml_5_model_evaluation.py`)**
 - Walk-forward (rolling-origin) evaluation with nested inner/outer folds; headline metrics are computed on the honest **outer** folds.
@@ -296,4 +304,17 @@ Every pipeline run operates on exactly one quarterly time series (1 row per quar
 
 **6. Model Validation & Registry (`ml_6_model_validation.py`)**
 - **MAPE champion/challenger gate**: one registered model per sector (sector-keyed name). A challenger is promoted to `@prod` only if its MAPE is finite and strictly lower than the incumbent champion's MAPE — or seeded unconditionally when no champion exists yet. Losing runs stay diagnosable (`passed_gate=false`) but are not registered, so the registry only grows on genuine improvement.
-- R² is recorded alongside (optional `r2_floor`, disabled by default). The promoted version is tagged with `mape` / `r2` / `model_family`, so each registered model's accuracy is readable straight from the MLflow UI.
+- R² is recorded alongside (optional `r2_floor`, disabled by default). The promoted version **self-describes** via tags `mape` / `r2` / `model_family` / `model_type` / `feature_groups`, so the registry alone tells you each champion's accuracy, algorithm, and the config features it used.
+
+### Sector Performance Read-Model (`m_sector_quality.py`)
+MLflow is the single source of truth (each sector's `@prod` champion self-describes). For visualizations and downstream apps, `refresh_sector_performance()` materialises a denormalised **`sector_performance`** table in the eval DB — a refresh-only projection that joins each champion with the baseline MAPE and the CBS SBI hierarchy:
+
+| Concern | Function |
+|---|---|
+| Per-sector champion vs baseline tiers (Good/Medium/Poor) | `build_sector_quality_table()` |
+| Enrich with SBI title + level | `enrich_with_hierarchy()` (via `m_sbi_classifier`) |
+| Refresh the read-model from MLflow | `refresh_sector_performance()` |
+| Read it for charts/apps | `load_sector_performance()` |
+| JSON hierarchy tree (champion · model_type · sector · performance) | `to_tree()` |
+
+Tiers are **benchmarked against the baseline model** (`SectorQuarterRollingMean`): a sector is *Good* only when its champion beats the naive baseline's MAPE by ≥ 10%, *Poor* when it cannot beat it. Charts are rendered by `m_model_viz.py` (`plot_sector_leaderboard`, `plot_predicted_vs_actual`).
