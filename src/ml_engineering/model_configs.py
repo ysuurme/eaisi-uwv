@@ -43,10 +43,11 @@ from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sktime.forecasting.base import BaseForecaster
-from sktime.forecasting.compose import make_reduction
+from sktime.forecasting.compose import TransformedTargetForecaster, make_reduction
 from sktime.forecasting.ets import AutoETS
 from sktime.forecasting.naive import NaiveForecaster
-from sktime.forecasting.trend import STLForecaster
+from sktime.forecasting.trend import PolynomialTrendForecaster, STLForecaster
+from sktime.transformations.series.detrend import Deseasonalizer, Detrender
 from sqlalchemy import String, Float, Integer, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -174,6 +175,51 @@ class SectorPerformance(Base):
     r2:            Mapped[Optional[float]] = mapped_column(Float)
     tier:          Mapped[Optional[str]] = mapped_column(String)
     refreshed_at:  Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
+
+
+class ModelForecastRecord(Base):
+    """Forward 4Q forecast produced by a sector's ``@prod`` champion (Step 7).
+
+    Additive durable projection written by ``ml_orchestrator.run_forecast``
+    (delete-then-insert per ``sector_code``), mirroring the
+    ``model_predictions`` / ``sector_performance`` pattern: MLflow stays the
+    single source of truth (the champion + its lineage), and this table is a
+    queryable surface for charts/apps and downstream consumers.
+
+    One row per ``(sector_code, target_date / horizon)``.  Unlike
+    ``model_predictions`` — walk-forward ``y_true`` vs ``y_pred`` on observed
+    HISTORY — these rows are genuine out-of-sample forecasts for quarters that
+    have not happened yet, so there is no ``y_true``.  ``forecast_made_on`` is
+    the origin (the last observed quarter end the champion was refit through);
+    ``feature_catalog_hash`` ties the forecast back to the exact resolved feature
+    set the champion was trained on (the producing run's ``feature_set_hash``
+    tag), so a forecast is reproducible from MLflow metadata alone.
+    """
+    __tablename__ = "model_forecasts"
+
+    # Surrogate key — each forecast row is independent
+    id:                   Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Sector + champion provenance (resolved from the registry @prod alias)
+    sector_code:          Mapped[str] = mapped_column(String, index=True)
+    model_family:         Mapped[Optional[str]] = mapped_column(String)
+    model_type:           Mapped[Optional[str]] = mapped_column(String)
+    experiment_key:       Mapped[Optional[str]] = mapped_column(String)
+    champion_version:     Mapped[Optional[str]] = mapped_column(String)
+
+    # Forecast coordinates — origin (last observed quarter) → future target dates
+    forecast_made_on:     Mapped[str] = mapped_column(DateTime)
+    target_date:          Mapped[str] = mapped_column(DateTime, index=True)
+    horizon:              Mapped[int] = mapped_column(Integer)
+
+    # The forward prediction (no y_true — these quarters have not happened)
+    y_pred:               Mapped[float] = mapped_column(Float)
+
+    # Reproducibility: the champion's resolved feature-set hash (ml_4 run tag)
+    feature_catalog_hash: Mapped[Optional[str]] = mapped_column(String)
+
+    # Auto-populated insert time
+    generated_at:         Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +423,47 @@ def _to_period(data):
     converted = data.copy()
     converted.index = pd.DatetimeIndex(converted.index).to_period("Q")
     return converted
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 challenger builders — deseasonalize/detrend the target before the
+# sklearn reducer (the notebook hypothesis: removing seasonality/trend makes
+# feature-pipeline ML competitive with STL+ETS / AutoETS).  Decomposition
+# transformers need a frequency-aware index, so the chain is wrapped in
+# QuarterlyPeriodForecaster (PeriodIndex internally).  Factored so the three
+# deseason arms (full / structural / labor ablations) share one definition.
+# ---------------------------------------------------------------------------
+
+def _ridge_recursive_reducer():
+    """A fresh Ridge-in-scaler recursive lag-window reducer."""
+    return make_reduction(
+        Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
+        window_length=4, strategy="recursive",
+    )
+
+
+def _deseason_ridge(detrend: bool = False):
+    """Deseasonalized (optionally + linearly detrended) Ridge reducer.
+
+    ``Deseasonalizer(sp=4)`` removes quarterly seasonality from the target;
+    with ``detrend=True`` a degree-1 ``Detrender`` also removes the linear
+    trend.  The Ridge lag-window reducer then learns on the residual, and
+    ``QuarterlyPeriodForecaster`` re-adds the frequency the transformers need.
+    """
+    steps = [("deseason", Deseasonalizer(sp=4))]
+    if detrend:
+        steps.append(("detrend", Detrender(PolynomialTrendForecaster(degree=1))))
+    steps.append(("reduce", _ridge_recursive_reducer()))
+    return QuarterlyPeriodForecaster(TransformedTargetForecaster(steps))
+
+
+#: Shared ≤16-combo grid for the deseason reducer arms (2 × 4 = 8 combos).
+#: Keys route window_length + Ridge alpha through the wrapper → transformed
+#: target → named ``reduce`` step → make_reduction → scaler pipeline → Ridge.
+_DESEASON_GRID = {
+    "forecaster__reduce__window_length": [4, 8],
+    "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +711,17 @@ class ModelConfiguration:
         magnitude and would otherwise hijack the regularisation budget.
         Tree-family models (random_forest / hist_gbr) are scale-invariant and
         are NOT wrapped in a scaler.
+
+    Feature-ML challengers (Phase 4 — ridge_deseason* / ridge_direct):
+        Give the feature pipeline a fair shot at the seeded stat champions.
+        ``ridge_deseason`` / ``ridge_deseason_detrend`` remove quarterly
+        seasonality (and optionally the linear trend) from the target before the
+        Ridge reducer, wrapped in ``QuarterlyPeriodForecaster`` (the
+        decomposition transformers need a frequency-aware index).
+        ``ridge_direct`` swaps the recursive strategy for ``direct`` (one
+        regressor per horizon; fh required at fit).  The ``_structural`` /
+        ``_labor`` suffixes are feature-group ablations of the deseason mechanic.
+        ``ridge`` is the undeseasonalized control.
     """
 
     _CATALOG: Dict[str, ModelExperiment] = {
@@ -793,6 +891,72 @@ class ModelConfiguration:
                 "to maximise covariance with y, not variance in X.  Often "
                 "outperforms Ridge in p>>n regimes."
             ),
+        ),
+        # ── Phase 4: feature-ML challengers (deseasonalize / detrend / direct) ──
+        # Give feature-pipeline ML a fair shot at the seeded stat champions: the
+        # notebook had feature ML (MASE 2.36) losing to STL+ETS (0.93) / AutoETS
+        # (1.17); removing seasonality/trend before the reducer closes that gap.
+        # All face the SAME walk-forward MAPE gate.  Grids ≤16; `ridge` above is
+        # the undeseasonalized control.
+        "ridge_deseason": ModelExperiment(
+            name="RidgeDeseason_Reduced",
+            estimator=_deseason_ridge(),
+            param_grid={
+                "forecaster__reduce__window_length": [4, 8],
+                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+            feature_groups=["all_survivors"],
+            description="Ridge reducer on a seasonally-adjusted target (Deseasonalizer sp=4) — quarterly seasonality removed before lag-window reduction.",
+        ),
+        "ridge_deseason_detrend": ModelExperiment(
+            name="RidgeDeseasonDetrend_Reduced",
+            estimator=_deseason_ridge(detrend=True),
+            param_grid={
+                "forecaster__reduce__window_length": [4, 8],
+                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+            feature_groups=["all_survivors"],
+            description="Ridge reducer on a deseasonalized + linearly-detrended target — both seasonality and trend removed before reduction.",
+        ),
+        "ridge_direct": ModelExperiment(
+            name="RidgeDirect_Reduced",
+            estimator=make_reduction(
+                Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
+                window_length=4, strategy="direct",
+            ),
+            param_grid={
+                "window_length": [4, 8],
+                "estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+            feature_groups=["all_survivors"],
+            description="Ridge reducer with the DIRECT multi-step strategy (one regressor per horizon 1-4) rather than recursive. fh is required at fit time.",
+        ),
+        # Feature-group ablation arms of the deseason mechanic (the leading
+        # notebook hypothesis) — separate keys so MLflow lineage pivots cleanly
+        # by feature set.  `ridge_deseason` (all_survivors) is the base arm;
+        # re-point these to the winning mechanic if the live screen favours
+        # detrend/direct.
+        "ridge_deseason_structural": ModelExperiment(
+            name="RidgeDeseasonStructural_Reduced",
+            estimator=_deseason_ridge(),
+            param_grid={
+                "forecaster__reduce__window_length": [4, 8],
+                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+            feature_groups=["structural_only"],
+            description="Ablation: deseason mechanic on STRUCTURAL features only (trend/regime/temporal) — isolates lag/structure signal from the CBS drivers.",
+        ),
+        "ridge_deseason_labor": ModelExperiment(
+            name="RidgeDeseasonLabor_Reduced",
+            estimator=_deseason_ridge(),
+            param_grid={
+                "forecaster__reduce__window_length": [4, 8],
+                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+            # labor_volume did not survive feature selection in the active
+            # catalog; labor_structure is the available labor-domain group.
+            feature_groups=["labor_structure"],
+            description="Ablation: deseason mechanic on the labor-domain feature group only (labor_structure — the available labor group in the active catalog).",
         ),
         # Removed: "hist_gradient_boosting" was a near-duplicate of "hist_gbr".
         # Single source of truth.

@@ -1,0 +1,5 @@
+model_family,all_survivors,discovery,labor_volume
+LinearRegression_Reduced,,,0.2574374235923233
+RidgeDeseason_Reduced,0.05662789244909402,,
+RidgeDirect_Reduced,0.09737878031185715,,
+SectorQuarterRollingMean,,0.07287459952489667,

@@ -7,13 +7,21 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from src.config import ML_TARGET_COLUMN
 from src.ml_engineering.ml_orchestrator import (
+    _ensure_eval_db,
     _group_by_registry_category,
     _partition_candidates,
+    _persist_forecasts,
     run_feature_selection,
+    run_forecast,
     run_pipeline,
+    run_report,
 )
+from src.ml_engineering.model_configs import ModelForecastRecord
 
 
 class TestPipeline(unittest.TestCase):
@@ -268,6 +276,176 @@ class TestRunFeatureSelection(unittest.TestCase):
             ):
                 with self.assertRaises(RuntimeError):
                     run_feature_selection(gold_table="test_gold")
+
+
+# ---------------------------------------------------------------------------
+# Forecast production (run_forecast + _persist_forecasts) — Step 7 wiring
+# ---------------------------------------------------------------------------
+
+def _forecast_frame(sector: str, y_preds, hash_: str = "abc12345") -> pd.DataFrame:
+    """A tidy ml_7-style forecast frame (origin 2025Q3 → future 2025Q4…)."""
+    n = len(y_preds)
+    origin = pd.Timestamp("2025-09-30")
+    dates = pd.date_range("2025-12-31", periods=n, freq="QE")
+    return pd.DataFrame({
+        "sector_code": [sector] * n,
+        "model_family": ["Ridge_Reduced"] * n,
+        "model_type": ["Ridge"] * n,
+        "experiment_key": ["ridge"] * n,
+        "champion_version": ["3"] * n,
+        "origin_date": [origin] * n,
+        "target_date": dates,
+        "horizon": list(range(1, n + 1)),
+        "y_pred": list(y_preds),
+        "feature_catalog_hash": [hash_] * n,
+    })
+
+
+class TestPersistForecasts(unittest.TestCase):
+    """Delete-then-insert into model_forecasts against a real temp SQLite DB."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        db = Path(self._tmp.name) / "eval.db"
+        self.engine = create_engine(f"sqlite:///{db.as_posix()}")
+        _ensure_eval_db(self.engine)  # creates model_forecasts (additive table)
+
+    def tearDown(self):
+        self.engine.dispose()
+        self._tmp.cleanup()
+
+    def _rows(self):
+        with sessionmaker(bind=self.engine)() as session:
+            return session.query(ModelForecastRecord).all()
+
+    def test_write_maps_origin_to_forecast_made_on_and_hash(self):
+        n = _persist_forecasts(self.engine, _forecast_frame("T001081", [4.1, 3.7, 3.5, 3.9]))
+        self.assertEqual(n, 4)
+        rows = sorted(self._rows(), key=lambda r: r.horizon)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0].sector_code, "T001081")
+        # the frame's origin_date maps onto the table's forecast_made_on column
+        self.assertEqual(pd.Timestamp(rows[0].forecast_made_on), pd.Timestamp("2025-09-30"))
+        self.assertEqual(pd.Timestamp(rows[0].target_date), pd.Timestamp("2025-12-31"))
+        self.assertEqual(rows[0].feature_catalog_hash, "abc12345")
+        self.assertEqual([r.horizon for r in rows], [1, 2, 3, 4])
+
+    def test_delete_then_insert_replaces_only_same_sector(self):
+        _persist_forecasts(self.engine, _forecast_frame("T001081", [4.1, 3.7, 3.5, 3.9]))
+        _persist_forecasts(self.engine, _forecast_frame("301000", [5.1, 4.7, 4.5, 4.9]))
+        # Re-run T001081 with new values — must REPLACE its rows, not duplicate.
+        _persist_forecasts(
+            self.engine, _forecast_frame("T001081", [9.0, 9.0, 9.0, 9.0], hash_="zzz")
+        )
+        rows = self._rows()
+        self.assertEqual(len(rows), 8)  # 4 (301000) + 4 (fresh T001081), no dupes
+        t = [r for r in rows if r.sector_code == "T001081"]
+        self.assertEqual(len(t), 4)
+        self.assertTrue(all(r.y_pred == 9.0 for r in t))
+        self.assertTrue(all(r.feature_catalog_hash == "zzz" for r in t))
+        # the other sector is left untouched by a single-sector re-run
+        self.assertEqual(len([r for r in rows if r.sector_code == "301000"]), 4)
+
+
+class TestRunForecastWiring(unittest.TestCase):
+    """Orchestrator wiring with a mocked registry/eval-DB boundary."""
+
+    @patch("src.ml_engineering.ml_orchestrator._render_forecast_figures")
+    @patch("src.ml_engineering.ml_orchestrator._persist_forecasts", return_value=8)
+    @patch("src.ml_engineering.ml_7_model_inference.forecast_all_champions")
+    @patch("mlflow.tracking.MlflowClient")
+    @patch("src.ml_engineering.ml_orchestrator._ensure_eval_db")
+    @patch("src.ml_engineering.ml_orchestrator.create_engine")
+    @patch("src.ml_engineering.ml_orchestrator._configure_mlflow")
+    def test_persists_and_renders_when_champions_exist(
+        self, mock_cfg, mock_engine, mock_ensure, mock_client_cls,
+        mock_forecast_all, mock_persist, mock_render,
+    ):
+        frame = pd.concat(
+            [_forecast_frame("T001081", [1, 2, 3, 4]),
+             _forecast_frame("301000", [1, 2, 3, 4])],
+            ignore_index=True,
+        )
+        mock_forecast_all.return_value = frame
+
+        n = run_forecast(gold_table="master_data_ml_preprocessed")
+
+        self.assertEqual(n, 8)
+        mock_forecast_all.assert_called_once()
+        mock_persist.assert_called_once()
+        mock_render.assert_called_once()
+
+    @patch("src.ml_engineering.ml_orchestrator._render_forecast_figures")
+    @patch("src.ml_engineering.ml_orchestrator._persist_forecasts")
+    @patch("src.ml_engineering.ml_7_model_inference.forecast_all_champions")
+    @patch("mlflow.tracking.MlflowClient")
+    @patch("src.ml_engineering.ml_orchestrator._ensure_eval_db")
+    @patch("src.ml_engineering.ml_orchestrator.create_engine")
+    @patch("src.ml_engineering.ml_orchestrator._configure_mlflow")
+    def test_empty_registry_writes_nothing(
+        self, mock_cfg, mock_engine, mock_ensure, mock_client_cls,
+        mock_forecast_all, mock_persist, mock_render,
+    ):
+        mock_forecast_all.return_value = pd.DataFrame()
+
+        n = run_forecast()
+
+        self.assertEqual(n, 0)
+        mock_persist.assert_not_called()
+        mock_render.assert_not_called()
+
+
+class TestRunReportWiring(unittest.TestCase):
+    """run_report orchestrates the read-model refresh + figure bundle + summary.
+
+    After consolidation, the full figure bundle (standard + experiment matrix)
+    comes from m_model_viz.generate_all, and the narrative from
+    m_sector_quality.build_narrative_markdown — m_experiment_matrix is gone.
+    """
+
+    @patch("src.ml_engineering.ml_orchestrator._configure_mlflow")
+    @patch("src.utils.m_sector_quality.build_narrative_markdown", return_value="# report\n")
+    @patch("src.utils.m_model_viz.generate_all", return_value=["f1.png", "f2.png", "f3.png"])
+    @patch("src.utils.m_sector_quality.write_report")
+    @patch("src.utils.m_sector_quality.load_sector_performance")
+    @patch("src.utils.m_sector_quality.refresh_sector_performance", return_value=3)
+    def test_report_runs_all_stages_and_writes_summary(
+        self, mock_refresh, mock_load, mock_write, mock_viz_all, mock_narrative, mock_cfg,
+    ):
+        mock_load.return_value = pd.DataFrame()
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / ".claude" / "week_2026-06-19_model_report.md"
+            with patch("src.ml_engineering.ml_orchestrator.PROJECT_ROOT", Path(tmp)):
+                result = run_report(gold_table="master_data_ml_preprocessed")
+
+            self.assertTrue(summary.exists())
+            self.assertEqual(summary.read_text(encoding="utf-8"), "# report\n")
+
+        mock_refresh.assert_called_once()
+        mock_viz_all.assert_called_once()
+        mock_narrative.assert_called_once()
+        self.assertEqual(result["sectors"], 3)
+        self.assertEqual(result["figures"], 3)
+
+    @patch("src.ml_engineering.ml_orchestrator._configure_mlflow")
+    @patch("src.utils.m_sector_quality.build_narrative_markdown", return_value="# r\n")
+    @patch("src.utils.m_model_viz.generate_all", return_value=[])
+    @patch("src.utils.m_sector_quality.write_report")
+    @patch("src.utils.m_sector_quality.load_sector_performance")
+    @patch("src.utils.m_sector_quality.refresh_sector_performance")
+    def test_report_survives_refresh_failure(
+        self, mock_refresh, mock_load, mock_write, mock_viz_all, mock_narrative, mock_cfg,
+    ):
+        """A failing hierarchy refresh (e.g. missing dimension file) must not
+        abort the report — the rest of the stages still run."""
+        mock_refresh.side_effect = FileNotFoundError("dimension json missing")
+        mock_load.return_value = pd.DataFrame()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.ml_engineering.ml_orchestrator.PROJECT_ROOT", Path(tmp)):
+                result = run_report()
+
+        mock_viz_all.assert_called_once()
+        self.assertEqual(result["sectors"], 0)
 
 
 if __name__ == "__main__":

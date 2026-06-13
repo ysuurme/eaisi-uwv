@@ -18,6 +18,11 @@ from src.utils.m_model_viz import (  # noqa: E402
     leaderboard,
     plot_sector_leaderboard,
     plot_predicted_vs_actual,
+    plot_forecast,
+    plot_matrix_heatmap,
+    plot_horizon_curve,
+    plot_forecast_overlay,
+    plot_importance_bars,
     save_figure,
 )
 
@@ -45,6 +50,25 @@ def _predictions_df():
     })
 
 
+def _history_df():
+    dates = pd.date_range("2023-03-31", periods=8, freq="QE")
+    return pd.DataFrame({
+        "sector_code": ["T001081"] * 8,
+        "target_date": dates,
+        "y_true": [4.0, 3.6, 3.4, 3.8, 4.2, 3.7, 3.5, 3.9],
+    })
+
+
+def _forecast_df():
+    dates = pd.date_range("2025-03-31", periods=4, freq="QE")
+    return pd.DataFrame({
+        "sector_code": ["T001081"] * 4,
+        "target_date": dates,
+        "y_pred": [4.1, 3.7, 3.5, 3.9],
+        "horizon": [1, 2, 3, 4],
+    })
+
+
 class TestLeaderboard(unittest.TestCase):
     def test_ranks_by_champion_mape_ascending(self):
         lb = leaderboard(_quality_df())
@@ -63,6 +87,40 @@ class TestPlots(unittest.TestCase):
     def test_plot_predicted_vs_actual_returns_figure(self):
         fig = plot_predicted_vs_actual(_predictions_df(), sector_code="T001081")
         self.assertIsInstance(fig, Figure)
+
+    def test_plot_forecast_returns_figure(self):
+        fig = plot_forecast(_history_df(), _forecast_df(), sector_code="T001081")
+        self.assertIsInstance(fig, Figure)
+
+    def test_plot_forecast_handles_missing_sector(self):
+        """A sector with no history/forecast rows renders an empty-state figure,
+        not an exception."""
+        fig = plot_forecast(_history_df(), _forecast_df(), sector_code="999999")
+        self.assertIsInstance(fig, Figure)
+
+    def test_plot_matrix_heatmap_and_empty(self):
+        mape = pd.DataFrame({"all_survivors": [0.05, 0.07]}, index=["Ridge", "Baseline"])
+        wins = pd.DataFrame({"all_survivors": [1, 0]}, index=["Ridge", "Baseline"])
+        self.assertIsInstance(plot_matrix_heatmap(mape, wins), Figure)
+        self.assertIsInstance(plot_matrix_heatmap(pd.DataFrame()), Figure)
+
+    def test_plot_horizon_curve_and_empty(self):
+        df = pd.DataFrame({"horizon": [1, 2, 3, 4], "mape": [0.06, 0.1, 0.13, 0.16], "n": [3] * 4})
+        self.assertIsInstance(plot_horizon_curve(df), Figure)
+        self.assertIsInstance(plot_horizon_curve(pd.DataFrame()), Figure)
+
+    def test_plot_forecast_overlay_and_empty(self):
+        df = pd.DataFrame({
+            "sector_code": ["T001081", "T001081"],
+            "target_date": pd.to_datetime(["2025-12-31", "2026-03-31"]),
+            "y_pred": [5.0, 5.5],
+        })
+        self.assertIsInstance(plot_forecast_overlay(df), Figure)
+        self.assertIsInstance(plot_forecast_overlay(pd.DataFrame()), Figure)
+
+    def test_plot_importance_bars(self):
+        df = pd.DataFrame({"feature": ["a", "b"], "weight": [0.5, -0.3]})
+        self.assertIsInstance(plot_importance_bars("T001081", df), Figure)
 
     def test_save_figure_writes_png(self):
         fig = plot_sector_leaderboard(_quality_df())

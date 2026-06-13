@@ -9,6 +9,12 @@ Data engineering (raw → bronze → silver → gold):
 Feature selection (gold → statistical funnel → feature_catalog.json):
     python main.py --select-features
 
+Forward forecast (every @prod champion → model_forecasts + figures):
+    python main.py --forecast
+
+Champion-based report (refresh read-models + regenerate all figures/CSVs + summary):
+    python main.py --report
+
 All-industry mode (default):
     python main.py <gold_table> <model_key> [sbi_filter_col] [group1,group2,...]
 
@@ -29,7 +35,9 @@ import sys
 from src.config import START_MLFLOW_UI
 from src.ml_engineering.ml_orchestrator import (
     run_feature_selection,
+    run_forecast,
     run_pipeline,
+    run_report,
     run_sector_sweep,
 )
 from src.utils.m_log import setup_logging, f_log
@@ -68,6 +76,18 @@ def main() -> None:
         sys.argv.remove("--select-features")
         gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
         run_feature_selection(gold_table=gold_table)
+        return
+
+    if "--forecast" in sys.argv:
+        sys.argv.remove("--forecast")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_forecast(gold_table=gold_table)
+        return
+
+    if "--report" in sys.argv:
+        sys.argv.remove("--report")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_report(gold_table=gold_table)
         return
 
     gold_table    = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"

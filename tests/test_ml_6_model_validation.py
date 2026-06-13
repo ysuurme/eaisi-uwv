@@ -146,5 +146,23 @@ class TestMapeChampionGate(unittest.TestCase):
         self.assertEqual(tagged.get("feature_groups"), '["labor_volume", "workforce"]')
 
 
+class TestModelUri(unittest.TestCase):
+    """The alias URI must be MLflow's ``models:/<name>@<alias>`` form — the
+    earlier ``/@`` variant is invalid and MLflow rejects it on load."""
+
+    @patch("src.ml_engineering.ml_6_model_validation.MlflowClient")
+    def test_alias_uri_has_no_slash_before_at(self, _mock_client):
+        validator = ModelValidator()
+        uri = validator.get_model_uri("master_SickLeave_4Q_301000")
+        self.assertEqual(uri, "models:/master_SickLeave_4Q_301000@prod")
+        self.assertNotIn("/@", uri)
+
+    @patch("src.ml_engineering.ml_6_model_validation.MlflowClient")
+    def test_alias_uri_honours_explicit_alias(self, _mock_client):
+        validator = ModelValidator()
+        uri = validator.get_model_uri("m", alias="staging")
+        self.assertEqual(uri, "models:/m@staging")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -185,8 +185,16 @@ class ModelValidator:
         return version
 
     def get_model_uri(self, registered_model_name: str, alias: str = _PROD_ALIAS) -> str:
-        """Returns the URI for loading a registered model by alias."""
-        return f"models:/{registered_model_name}/@{alias}"
+        """Returns the URI for loading a registered model by alias.
+
+        MLflow's alias URI form is ``models:/<name>@<alias>`` (no slash before
+        ``@``).  An earlier draft emitted ``models:/<name>/@<alias>``, which
+        MLflow rejects; this helper was never called (Step 7 deliberately
+        rebuilds + refits from lineage rather than loading the pyfunc artifact),
+        so the bug stayed latent — fixed here so the helper is correct for any
+        future loader.
+        """
+        return f"models:/{registered_model_name}@{alias}"
 
     # ── side-effect helpers (best-effort; never abort the gate) ────────────
     def _safe_set_run_tag(self, run_id: str, key: str, value: str) -> None:

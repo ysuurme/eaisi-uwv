@@ -486,7 +486,10 @@ def _predict_origin(
     X_fut = X_fut_num if not X_fut_num.empty else None
 
     fh = ForecastingHorizon(range(1, _FH_STEPS + 1), is_relative=True)
-    estimator.fit(y=y_train, X=X_tr)
+    # fh at fit (not only predict) so strategy="direct" reducers — which require
+    # fh-in-fit — evaluate through the same walk-forward path; harmless for the
+    # recursive/stat forecasters, which accept and store it.
+    estimator.fit(y=y_train, X=X_tr, fh=fh)
     return np.asarray(estimator.predict(fh=fh, X=X_fut))
 
 

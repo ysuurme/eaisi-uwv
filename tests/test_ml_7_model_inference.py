@@ -15,7 +15,7 @@ The end-to-end registry/gold-DB path is covered by the week-plan smoke runs.
 """
 import json
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -105,7 +105,7 @@ class TestForecastFromHistory(unittest.TestCase):
             x, y,
             sector_code="T001081", model_family="SectorQuarterRollingMean",
             model_type="SectorQuarterRollingMean", experiment_key="baseline",
-            champion_version="1", n_steps=4,
+            champion_version="1", feature_catalog_hash="deadbeef1234", n_steps=4,
         )
         self.assertEqual(len(frame), 4)
         self.assertEqual(list(frame["horizon"]), [1, 2, 3, 4])
@@ -115,6 +115,8 @@ class TestForecastFromHistory(unittest.TestCase):
         self.assertTrue((pd.DatetimeIndex(frame["target_date"]) == expected_dates).all())
         self.assertTrue(np.isfinite(frame["y_pred"]).all())
         self.assertTrue((frame["sector_code"] == "T001081").all())
+        # Reproducibility column carried through to every forecast row.
+        self.assertTrue((frame["feature_catalog_hash"] == "deadbeef1234").all())
 
     def test_sktime_univariate_branch(self):
         x, y = _quarterly_history()
@@ -136,7 +138,7 @@ class TestForecastFromHistory(unittest.TestCase):
 
 class TestReadChampionLineage(unittest.TestCase):
 
-    def _mock_client(self, params, tags):
+    def _mock_client(self, params, tags, run_tags=None):
         client = MagicMock()
         mv = MagicMock()
         mv.version = "7"
@@ -145,6 +147,8 @@ class TestReadChampionLineage(unittest.TestCase):
         client.get_model_version_by_alias.return_value = mv
         run = MagicMock()
         run.data.params = params
+        # feature_set_hash lives on the RUN tags (mlflow.set_tags in Step 4).
+        run.data.tags = run_tags if run_tags is not None else {}
         client.get_run.return_value = run
         return client
 
@@ -155,6 +159,7 @@ class TestReadChampionLineage(unittest.TestCase):
                 "best_params": json.dumps({"window_length": "8"}),
             },
             tags={"model_family": "Ridge_Reduced", "model_type": "Ridge"},
+            run_tags={"feature_set_hash": "abc123def456"},
         )
         lineage = ml7._read_champion_lineage(
             client, "master_SickLeave_4Q_T001081", "T001081",
@@ -165,6 +170,7 @@ class TestReadChampionLineage(unittest.TestCase):
         self.assertEqual(lineage.model_type, "Ridge")
         self.assertEqual(lineage.version, "7")
         self.assertEqual(lineage.best_params, {"window_length": "8"})
+        self.assertEqual(lineage.feature_catalog_hash, "abc123def456")
 
     def test_missing_best_params_yields_empty_dict(self):
         client = self._mock_client(
@@ -175,6 +181,26 @@ class TestReadChampionLineage(unittest.TestCase):
         )
         self.assertEqual(lineage.best_params, {})
         self.assertEqual(lineage.experiment_key, "baseline")
+        # No feature_set_hash run tag → empty string, never raises.
+        self.assertEqual(lineage.feature_catalog_hash, "")
+
+
+class TestLoadSectorTargetHistory(unittest.TestCase):
+
+    def test_returns_tidy_target_frame(self):
+        """History helper flattens the (X, y) load into a (target_date, y_true)
+        frame for the forecast figure overlay — sector → SBI filter is honoured."""
+        x, y = _quarterly_history(periods=8)
+        with patch.object(ml7, "_load_sector_history", return_value=(x, y)) as mock_load:
+            frame = ml7.load_sector_target_history("master_data_ml_preprocessed", "301000")
+
+        # National-vs-sector mapping is delegated to _sector_to_sbi_filter.
+        _, kwargs = mock_load.call_args
+        called_args = mock_load.call_args.args
+        self.assertIn("BedrijfskenmerkenSBI2008_301000", called_args)
+        self.assertEqual(list(frame.columns), ["target_date", "y_true"])
+        self.assertEqual(len(frame), 8)
+        self.assertTrue((frame["y_true"].to_numpy() == y.to_numpy()).all())
 
 
 if __name__ == "__main__":

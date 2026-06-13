@@ -38,6 +38,13 @@ from src.ml_engineering.model_configs import (
 from src.utils.m_log import f_log
 
 
+#: Training forecast horizon — the 4 quarters the project forecasts ahead.
+#: Passed to ``.fit`` (not just CV) so ``strategy="direct"`` reducers, which
+#: require ``fh`` at fit time (``requires-fh-in-fit=True``), train correctly.
+#: Harmless for recursive/stat forecasters, which accept and store it.
+_FH = [1, 2, 3, 4]
+
+
 # ---------------------------------------------------------------------------
 # pyfunc wrapper — bridges MLflow's predict(model_input) with sktime's
 # predict(fh, X) API, enabling sktime models to be registered in the registry.
@@ -180,21 +187,23 @@ class ModelTrainer:
         X = X_numeric if (experiment.feature_groups is not None and not X_numeric.empty) else None
 
         if not experiment.param_grid:
-            estimator.fit(y=y_train, X=X)
+            # fh passed at fit so direct-strategy reducers train (no-op for others).
+            estimator.fit(y=y_train, X=X, fh=_FH)
             return estimator
 
         f_log(f"Tuning {experiment.name} with ForecastingGridSearchCV...", c_type="process")
         # fh=[1,2,3,4]: evaluate all 4 quarters of the forecast horizon in each fold.
         # step_length=4: advance one full year per fold (quarterly seasonal alignment).
         # initial_window=40: require 10 years of data before the first CV fold.
-        cv = ExpandingWindowSplitter(initial_window=40, step_length=4, fh=[1, 2, 3, 4])
+        cv = ExpandingWindowSplitter(initial_window=40, step_length=4, fh=_FH)
         grid = ForecastingGridSearchCV(
             forecaster=estimator,
             param_grid=experiment.param_grid,
             cv=cv,
             scoring=MeanSquaredError(square_root=False),
         )
-        grid.fit(y=y_train, X=X)
+        # fh at fit so the final refit on full data is direct-strategy-ready.
+        grid.fit(y=y_train, X=X, fh=_FH)
         self._store_tuning_results(run_id, grid.cv_results_)
         # Reproducibility: the chosen hyperparameters and the full grid searched.
         mlflow.log_params({

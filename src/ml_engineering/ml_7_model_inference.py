@@ -76,6 +76,7 @@ class ChampionLineage:
     model_family: str
     model_type: str
     feature_groups: str = ""
+    feature_catalog_hash: str = ""
     best_params: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -162,6 +163,7 @@ def _forecast_from_history(
     model_type: str,
     experiment_key: str,
     champion_version: str,
+    feature_catalog_hash: str = "",
     n_steps: int = _FH_STEPS,
 ) -> pd.DataFrame:
     """Refit ``estimator`` on full history and forecast ``n_steps`` quarters.
@@ -169,7 +171,8 @@ def _forecast_from_history(
     Builds production-honest future ``X`` with :func:`build_future_x` and
     forecasts via the shared Step-5 dispatch :func:`_predict_origin` (which
     handles both the sklearn baseline and sktime forecaster APIs).  Returns one
-    tidy row per forecast quarter.
+    tidy row per forecast quarter.  ``feature_catalog_hash`` is the champion's
+    resolved feature-set hash (carried through for durable reproducibility).
     """
     x_future = build_future_x(x_hist, n_steps=n_steps)
     y_pred = np.asarray(_predict_origin(estimator, y_hist, x_hist, x_future)).ravel()
@@ -178,15 +181,16 @@ def _forecast_from_history(
     rows: List[Dict[str, Any]] = []
     for h in range(min(n_steps, len(x_future), len(y_pred))):
         rows.append({
-            "sector_code":      sector_code,
-            "model_family":     model_family,
-            "model_type":       model_type,
-            "experiment_key":   experiment_key,
-            "champion_version": champion_version,
-            "origin_date":      origin,
-            "target_date":      _to_timestamp(x_future.index[h]),
-            "horizon":          int(h + 1),
-            "y_pred":           float(y_pred[h]),
+            "sector_code":          sector_code,
+            "model_family":         model_family,
+            "model_type":           model_type,
+            "experiment_key":       experiment_key,
+            "champion_version":     champion_version,
+            "origin_date":          origin,
+            "target_date":          _to_timestamp(x_future.index[h]),
+            "horizon":              int(h + 1),
+            "y_pred":               float(y_pred[h]),
+            "feature_catalog_hash": feature_catalog_hash,
         })
     return pd.DataFrame(rows)
 
@@ -206,6 +210,10 @@ def _read_champion_lineage(client, registered_model_name: str, sector_code: str)
     run = client.get_run(mv.run_id)
     params = dict(run.data.params or {})
     tags = dict(getattr(mv, "tags", None) or {})
+    # ``feature_set_hash`` is a RUN tag (mlflow.set_tags in Step 4), not a
+    # version tag — guard against a non-dict (e.g. a MagicMock in unit tests).
+    run_tags_raw = getattr(run.data, "tags", None)
+    run_tags = run_tags_raw if isinstance(run_tags_raw, dict) else {}
 
     try:
         best_params = json.loads(params.get("best_params", "{}")) or {}
@@ -220,6 +228,7 @@ def _read_champion_lineage(client, registered_model_name: str, sector_code: str)
         model_family=tags.get("model_family") or params.get("model_name", ""),
         model_type=tags.get("model_type") or params.get("base_estimator_class", ""),
         feature_groups=tags.get("feature_groups") or params.get("feature_groups", ""),
+        feature_catalog_hash=run_tags.get("feature_set_hash", ""),
         best_params=best_params if isinstance(best_params, dict) else {},
     )
 
@@ -249,6 +258,22 @@ def _load_sector_history(
     y = df[ML_TARGET_COLUMN].astype(float)
     x = _extract_feature_matrix(df, ML_TARGET_COLUMN)
     return x, y
+
+
+def load_sector_target_history(gold_table: str, sector_label: str) -> pd.DataFrame:
+    """Load a sector's observed target history as a tidy ``(target_date, y_true)``.
+
+    Used by the Step-7 forecast figure (orchestrator wiring) so the forward
+    forecast can be overlaid on the sector's realised sick-leave history.
+    Reuses the same Step 1 extraction + date handling as the forecast path;
+    feature groups are irrelevant here (only the target column is read).
+    """
+    sbi_filter_col = _sector_to_sbi_filter(sector_label)
+    _, y_hist = _load_sector_history(gold_table, sbi_filter_col, feature_groups=None)
+    return pd.DataFrame({
+        "target_date": [_to_timestamp(ix) for ix in y_hist.index],
+        "y_true": y_hist.to_numpy(dtype=float),
+    })
 
 
 def forecast_sector(
@@ -294,6 +319,7 @@ def forecast_sector(
         model_type=lineage.model_type,
         experiment_key=lineage.experiment_key,
         champion_version=lineage.version,
+        feature_catalog_hash=lineage.feature_catalog_hash,
         n_steps=n_steps,
     )
     f_log(

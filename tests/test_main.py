@@ -87,6 +87,45 @@ class TestMain(unittest.TestCase):
         mock_run.assert_not_called()
 
     @patch("main.run_pipeline")
+    @patch("main.run_forecast")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_forecast_flag(self, mock_ui, mock_forecast, mock_run):
+        """--forecast runs the forward-forecast flow and exits (no training)."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "--forecast"]):
+            from main import main
+            main()
+
+        mock_forecast.assert_called_once_with(gold_table="master_data_ml_preprocessed")
+        mock_run.assert_not_called()
+
+    @patch("main.run_pipeline")
+    @patch("main.run_forecast")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_forecast_flag_with_gold_table(self, mock_ui, mock_forecast, mock_run):
+        """--forecast honours an explicit gold-table positional argument."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "my_gold", "--forecast"]):
+            from main import main
+            main()
+
+        mock_forecast.assert_called_once_with(gold_table="my_gold")
+        mock_run.assert_not_called()
+
+    @patch("main.run_pipeline")
+    @patch("main.run_report")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_report_flag(self, mock_ui, mock_report, mock_run):
+        """--report runs the reporting flow and exits (no training)."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "--report"]):
+            from main import main
+            main()
+
+        mock_report.assert_called_once_with(gold_table="master_data_ml_preprocessed")
+        mock_run.assert_not_called()
+
+    @patch("main.run_pipeline")
     @patch("main.ensure_mlflow_ui")
     def test_main_feature_groups_parsed(self, mock_ui, mock_run):
         """Verify CLI feature group names are split and passed correctly (with sbi col)."""

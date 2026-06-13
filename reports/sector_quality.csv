@@ -1,0 +1,2 @@
+sector_code,sbi_title,sbi_level,model_family,model_type,feature_groups,champion_mape,baseline_mape,improvement,r2,tier,refreshed_at
+T001081,A-U Alle economische activiteiten,totaal,RidgeDeseason_Reduced,RecursiveTabularRegressionForecaster,"[""all_survivors""]",0.05662789244909402,0.07287459952489667,0.2229406018245379,-0.38460866979985875,Good,2026-06-13 11:24:55

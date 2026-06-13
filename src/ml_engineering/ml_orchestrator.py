@@ -45,6 +45,7 @@ from src.ml_engineering.model_configs import (
     _FEATURE_CATALOG_FILE,
     Base,
     ModelConfiguration,
+    ModelForecastRecord,
     reload_feature_catalog,
 )
 
@@ -299,6 +300,193 @@ def run_sector_sweep(
             f_log(f"Sector {sector_label} failed: {exc}", c_type="error")
 
     f_log("Sector sweep complete.", c_type="complete")
+
+
+# ---------------------------------------------------------------------------
+# Forecast Production Entry Point (Step 7 wiring)
+# ---------------------------------------------------------------------------
+
+def run_forecast(
+    gold_table: str = "master_data_ml_preprocessed",
+    n_steps: int = 4,
+    render_figures: bool = True,
+) -> int:
+    """Forward 4Q forecast from every ``@prod`` champion → ``model_forecasts``.
+
+    Step 7 (``ml_7_model_inference``) resolves each sector's registry champion,
+    refits it on the sector's full observed history, and forecasts ``n_steps``
+    quarters ahead.  This entry point wires that into the eval store and the
+    figure set:
+
+    * points MLflow at ``DIR_DB_EVAL`` and ensures the ORM tables exist
+      (``model_forecasts`` is additive — no existing table is touched);
+    * persists the tidy forecast frame with delete-then-insert **per
+      ``sector_code``** (re-running for a subset of sectors replaces only those
+      sectors' rows), mirroring the ``sector_performance`` refresh semantics;
+    * renders one best-effort ``reports/figures/forecast_<sector>.png`` overlay
+      per sector (a failing sector is logged and skipped, never fatal).
+
+    Champions must exist first — on an empty registry this logs a hint and
+    writes nothing.  Returns the number of forecast rows written.
+    """
+    from mlflow.tracking import MlflowClient
+    from src.ml_engineering import ml_7_model_inference as ml_7
+
+    f_log("Step 7 | Forward forecast from @prod champions", c_type="start")
+
+    _configure_mlflow(DIR_DB_EVAL)
+    DIR_DB_EVAL.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(
+        f"sqlite:///{DIR_DB_EVAL.as_posix()}", connect_args={"timeout": 30}
+    )
+    _ensure_eval_db(engine)
+
+    try:
+        client = MlflowClient()
+        forecasts = ml_7.forecast_all_champions(
+            client, gold_table=gold_table, n_steps=n_steps,
+        )
+        if forecasts.empty:
+            f_log(
+                "No @prod champions found — run the training sweep first "
+                "(e.g. `python main.py master_data_ml_preprocessed baseline "
+                "--all-sectors`).",
+                c_type="warning",
+            )
+            return 0
+        n_written = _persist_forecasts(engine, forecasts)
+    finally:
+        engine.dispose()  # release the SQLite file handle (Windows-safe)
+
+    f_log(
+        f"Forecast stored | {n_written} rows across "
+        f"{forecasts['sector_code'].nunique()} sectors → model_forecasts",
+        c_type="store",
+    )
+
+    if render_figures:
+        _render_forecast_figures(forecasts, gold_table)
+
+    f_log("Forecast production complete.", c_type="complete")
+    return n_written
+
+
+def _persist_forecasts(engine, forecasts) -> int:
+    """Delete-then-insert the forecast frame into ``model_forecasts`` per sector.
+
+    Replace-by-key semantics keyed on ``sector_code`` (the same projection
+    pattern as ``m_sector_quality.write_sector_performance``): each sector's
+    prior rows are deleted before its fresh forecast is inserted, so a partial
+    run never leaves stale rows for the sectors it covered nor wipes the ones it
+    did not.  The frame's ``origin_date`` maps to the table's ``forecast_made_on``.
+    """
+    records = forecasts.to_dict("records")
+    sectors = sorted({str(r["sector_code"]) for r in records})
+
+    with sessionmaker(bind=engine)() as session:
+        for sector in sectors:
+            session.query(ModelForecastRecord).filter(
+                ModelForecastRecord.sector_code == sector
+            ).delete()
+        for r in records:
+            session.add(ModelForecastRecord(
+                sector_code=str(r["sector_code"]),
+                model_family=r.get("model_family"),
+                model_type=r.get("model_type"),
+                experiment_key=r.get("experiment_key"),
+                champion_version=str(r.get("champion_version", "")),
+                forecast_made_on=r.get("origin_date"),
+                target_date=r.get("target_date"),
+                horizon=int(r["horizon"]),
+                y_pred=float(r["y_pred"]),
+                feature_catalog_hash=r.get("feature_catalog_hash") or "",
+            ))
+        session.commit()
+    return len(records)
+
+
+def _render_forecast_figures(forecasts, gold_table: str) -> None:
+    """Best-effort per-sector forecast overlays — never aborts the run.
+
+    Loads each sector's observed target history (Step 7 helper) and overlays the
+    forward forecast via ``m_model_viz.plot_forecast``, saving
+    ``reports/figures/forecast_<sector>.png``.  Any per-sector failure (or a
+    missing matplotlib backend) is logged and skipped.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        from src.ml_engineering import ml_7_model_inference as ml_7
+        from src.utils.m_model_viz import plot_forecast, save_figure
+    except Exception as exc:  # pragma: no cover - import/backend env issue
+        f_log(f"Forecast figures skipped (setup failed): {exc}", c_type="warning")
+        return
+
+    out_dir = PROJECT_ROOT / "reports" / "figures"
+    for sector in sorted(forecasts["sector_code"].astype(str).unique()):
+        try:
+            history = ml_7.load_sector_target_history(gold_table, sector)
+            save_figure(
+                plot_forecast(history, forecasts, sector),
+                out_dir / f"forecast_{sector}.png",
+            )
+        except Exception as exc:
+            f_log(f"Forecast figure for {sector} skipped: {exc}", c_type="warning")
+
+
+# ---------------------------------------------------------------------------
+# Reporting Entry Point (Phase 5 — main.py --report)
+# ---------------------------------------------------------------------------
+
+def run_report(gold_table: str = "master_data_ml_preprocessed") -> Dict[str, Any]:
+    """Champion-based reporting: regenerate every chart/CSV + a narrative summary.
+
+    One command, all read from the single sources of truth (the MLflow registry
+    + the eval-DB read tables):
+
+    1. refresh the ``sector_performance`` read-model (+ ``reports/sector_quality.csv``);
+    2. regenerate the standard figure set (leaderboard + predicted-vs-actual);
+    3. build the model-family × feature-group experiment matrix (+ horizon curve,
+       forecast overlay, champion-importance bars) and write ``experiment_matrix.csv``;
+    4. write the human-readable summary to ``.claude/`` (NOT the versioned tree).
+
+    Returns a small dict of counts/paths.  Each stage is best-effort — a missing
+    dimension file or empty source degrades that stage, never aborts the run.
+    """
+    from src.utils import m_model_viz, m_sector_quality
+
+    f_log("Reporting | regenerating champion-based report", c_type="start")
+    _configure_mlflow(DIR_DB_EVAL)
+
+    # 1. Refresh the sector_performance read-model + CSV (hierarchy enrichment is
+    #    the most env-fragile step — degrade to MLflow-only quality if it fails).
+    n_sectors = 0
+    try:
+        n_sectors = m_sector_quality.refresh_sector_performance(eval_db_path=DIR_DB_EVAL)
+    except Exception as exc:
+        f_log(f"sector_performance refresh degraded ({exc}); reporting from MLflow only.",
+              c_type="warning")
+    quality = m_sector_quality.load_sector_performance(DIR_DB_EVAL)
+    m_sector_quality.write_report(quality, PROJECT_ROOT / "reports" / "sector_quality.csv")
+
+    # 2. Full figure bundle (leaderboard, predicted-vs-actual, experiment matrix,
+    #    horizon decay, forecast overlay, champion importances) + matrix CSV.
+    figs = m_model_viz.generate_all(eval_db_path=DIR_DB_EVAL, gold_table=gold_table)
+
+    # 3. Narrative summary → .claude (non-versioned), aggregated by m_sector_quality.
+    summary_md = m_sector_quality.build_narrative_markdown(
+        eval_db_path=DIR_DB_EVAL, gold_table=gold_table,
+    )
+    summary_path = PROJECT_ROOT / ".claude" / "week_2026-06-19_model_report.md"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(summary_md, encoding="utf-8")
+
+    f_log(
+        f"Report complete | {n_sectors} sectors | {len(figs)} figures | "
+        f"summary → {summary_path.relative_to(PROJECT_ROOT)}",
+        c_type="complete",
+    )
+    return {"sectors": n_sectors, "figures": len(figs), "summary": str(summary_path)}
 
 
 # ---------------------------------------------------------------------------
