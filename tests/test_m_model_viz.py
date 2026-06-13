@@ -31,9 +31,10 @@ def _quality_df():
     return pd.DataFrame({
         "sector_code": ["301000", "T001081", "305700"],
         "model_family": ["HistGBR_Reduced", "Ridge_Reduced", "SectorQuarterRollingMean"],
+        "mase": [0.85, 0.70, 1.10],
+        "baseline_mase": [1.00, 1.00, 1.00],
+        "champion_mae": [0.22, 0.13, 0.39],
         "champion_mape": [0.12, 0.05, 0.20],
-        "baseline_mape": [0.18, 0.07, 0.20],
-        "improvement": [0.33, 0.286, 0.0],
         "r2": [0.4, 0.6, -0.2],
         "tier": ["Good", "Good", "Poor"],
     })
@@ -70,8 +71,9 @@ def _forecast_df():
 
 
 class TestLeaderboard(unittest.TestCase):
-    def test_ranks_by_champion_mape_ascending(self):
+    def test_ranks_by_mase_ascending(self):
         lb = leaderboard(_quality_df())
+        # ascending MASE: T001081 (0.70), 301000 (0.85), 305700 (1.10)
         self.assertEqual(list(lb["sector_code"]), ["T001081", "301000", "305700"])
         self.assertEqual(lb.iloc[0]["rank"], 1)
 
@@ -99,9 +101,9 @@ class TestPlots(unittest.TestCase):
         self.assertIsInstance(fig, Figure)
 
     def test_plot_matrix_heatmap_and_empty(self):
-        mape = pd.DataFrame({"all_survivors": [0.05, 0.07]}, index=["Ridge", "Baseline"])
+        mase = pd.DataFrame({"all_survivors": [0.70, 0.95]}, index=["Ridge", "Baseline"])
         wins = pd.DataFrame({"all_survivors": [1, 0]}, index=["Ridge", "Baseline"])
-        self.assertIsInstance(plot_matrix_heatmap(mape, wins), Figure)
+        self.assertIsInstance(plot_matrix_heatmap(mase, wins), Figure)
         self.assertIsInstance(plot_matrix_heatmap(pd.DataFrame()), Figure)
 
     def test_plot_horizon_curve_and_empty(self):

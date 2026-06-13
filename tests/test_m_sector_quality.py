@@ -1,13 +1,13 @@
 """
 Unit tests for sector forecast-quality bucketing (Good / Medium / Poor).
 
-Tiers are benchmarked against the BASELINE model (SectorQuarterRollingMean, the
-rolling 3-year same-quarter mean from 01_baselinemodel.py — "the model we need
-to outperform"). A sector is Good only when the champion beats the baseline by a
-margin; Poor when the champion fails to beat the baseline at all.
+Tiers are assigned on **MASE** (THE metric — outer-fold MAE scaled by the
+in-sample seasonal-naive m=4 MAE; lower is better, <1 beats the naive):
+Good ≤ 0.90, Medium < 1.0, Poor ≥ 1.0 (or non-finite). The baseline MASE
+(SectorQuarterRollingMean) is carried as an informative reference column.
 
 The registry (MlflowClient) is mocked at the boundary; the per-sector baseline
-MAPE is injected as a dict; the tier logic is exercised as a pure function.
+MASE is injected as a dict; the tier logic is exercised as a pure function.
 """
 import json
 import tempfile
@@ -53,9 +53,10 @@ def _cbs_hierarchy_df():
                          "section", "subdivision", "section", "size", "section"],
         "model_family": ["RidgeDeseason_Reduced"] * 10,
         "model_type":   ["Recursive"] * 10,
+        "mase":         [0.80] * 10,
+        "baseline_mase": [1.00] * 10,
+        "champion_mae": [0.13] * 10,
         "champion_mape": [0.05] * 10,
-        "baseline_mape": [0.07] * 10,
-        "improvement":  [0.28] * 10,
         "tier":         ["Good"] * 10,
     })
 
@@ -86,11 +87,12 @@ def _enriched_df():
         "model_family":  ["Ridge_Reduced", "HistGBR_Reduced", "SectorQuarterRollingMean"],
         "model_type":    ["Ridge", "HistGradientBoostingRegressor", "SectorQuarterRollingMean"],
         "feature_groups": ['["all_survivors"]', '["labor_volume"]', "discovery"],
+        "mase":          [0.70, 0.95, 1.10],
+        "baseline_mase": [1.00, 1.00, 1.00],
+        "champion_mae":  [0.13, 0.22, 0.39],
         "champion_mape": [0.05, 0.12, 0.20],
-        "baseline_mape": [0.07, 0.18, 0.20],
-        "improvement":   [0.286, 0.33, 0.0],
         "r2":            [0.6, 0.4, -0.2],
-        "tier":          ["Good", "Good", "Poor"],
+        "tier":          ["Good", "Medium", "Poor"],
     })
 
 
@@ -100,45 +102,43 @@ def _registered(name):
     return rm
 
 
-def _version(mape, r2, family="Ridge_Reduced", model_type="Ridge", feature_groups='["all_survivors"]'):
+def _version(mase, r2, family="Ridge_Reduced", model_type="Ridge",
+             feature_groups='["all_survivors"]', mape=0.05, mae=0.13):
     mv = MagicMock()
     mv.tags = {
-        "mape": str(mape), "r2": str(r2), "model_family": family,
-        "model_type": model_type, "feature_groups": feature_groups,
+        "mase": str(mase), "mae": str(mae), "mape": str(mape), "r2": str(r2),
+        "model_family": family, "model_type": model_type, "feature_groups": feature_groups,
     }
     return mv
 
 
 class TestAssignTier(unittest.TestCase):
-    def test_good_when_champion_beats_baseline_by_margin(self):
-        # 0.045 vs 0.060 → 25% better → Good
-        self.assertEqual(assign_tier(champion_mape=0.045, baseline_mape=0.060), "Good")
+    def test_good_when_mase_clears_skill_bar(self):
+        # MASE 0.80 ≤ 0.90 → clear skill over the seasonal naive → Good
+        self.assertEqual(assign_tier(0.80), "Good")
 
-    def test_good_boundary_exactly_ten_percent(self):
-        # 0.054 vs 0.060 → exactly 10% better → Good (inclusive)
-        self.assertEqual(assign_tier(champion_mape=0.054, baseline_mape=0.060), "Good")
+    def test_good_boundary_at_threshold(self):
+        # MASE exactly 0.90 → Good (inclusive)
+        self.assertEqual(assign_tier(0.90), "Good")
 
-    def test_medium_for_small_positive_improvement(self):
-        # 0.057 vs 0.060 → 5% better → Medium
-        self.assertEqual(assign_tier(champion_mape=0.057, baseline_mape=0.060), "Medium")
+    def test_medium_beats_naive_but_below_skill_bar(self):
+        # 0.90 < MASE < 1.0 → beats the naive, modestly → Medium
+        self.assertEqual(assign_tier(0.95), "Medium")
 
-    def test_poor_when_no_improvement_over_baseline(self):
-        self.assertEqual(assign_tier(champion_mape=0.060, baseline_mape=0.060), "Poor")
+    def test_poor_when_equal_to_naive(self):
+        # MASE == 1.0 → no lift over the naive → Poor
+        self.assertEqual(assign_tier(1.0), "Poor")
 
-    def test_poor_when_worse_than_baseline(self):
-        self.assertEqual(assign_tier(champion_mape=0.070, baseline_mape=0.060), "Poor")
+    def test_poor_when_worse_than_naive(self):
+        self.assertEqual(assign_tier(1.20), "Poor")
 
-    def test_non_finite_or_missing_baseline_is_poor(self):
-        self.assertEqual(assign_tier(champion_mape=float("nan"), baseline_mape=0.06), "Poor")
-        self.assertEqual(assign_tier(champion_mape=0.05, baseline_mape=None), "Poor")
-        self.assertEqual(assign_tier(champion_mape=0.05, baseline_mape=0.0), "Poor")
+    def test_non_finite_or_missing_mase_is_poor(self):
+        self.assertEqual(assign_tier(float("nan")), "Poor")
+        self.assertEqual(assign_tier(None), "Poor")
 
-    def test_margin_is_configurable(self):
-        # 5% improvement clears a 3% bar → Good
-        self.assertEqual(
-            assign_tier(champion_mape=0.057, baseline_mape=0.060, good_improvement=0.03),
-            "Good",
-        )
+    def test_skill_bar_is_configurable(self):
+        # A stricter bar: 0.85 no longer clears a 0.80 good_mase → Medium
+        self.assertEqual(assign_tier(0.85, good_mase=0.80), "Medium")
 
 
 class TestBuildSectorQualityTable(unittest.TestCase):
@@ -153,13 +153,13 @@ class TestBuildSectorQualityTable(unittest.TestCase):
 
         def by_alias(name, alias):
             return {
-                "master_SickLeave_4Q_T001081": _version(0.05, 0.6, "HistGBR_Reduced"),
-                "master_SickLeave_4Q_301000": _version(0.30, -1.0, "SectorQuarterRollingMean"),
+                "master_SickLeave_4Q_T001081": _version(0.70, 0.6, "HistGBR_Reduced"),
+                "master_SickLeave_4Q_301000": _version(1.10, -1.0, "SectorQuarterRollingMean"),
             }[name]
 
         self.client.get_model_version_by_alias.side_effect = by_alias
-        # Baseline MAPE per sector (from SectorQuarterRollingMean runs).
-        self.baseline = {"T001081": 0.07, "301000": 0.30}
+        # Baseline MASE per sector (from SectorQuarterRollingMean runs).
+        self.baseline = {"T001081": 1.00, "301000": 1.00}
 
     def _build(self):
         return build_sector_quality_table(
@@ -172,7 +172,7 @@ class TestBuildSectorQualityTable(unittest.TestCase):
         self.assertEqual(
             set(df.columns),
             {"sector_code", "model_family", "model_type", "feature_groups",
-             "champion_mape", "baseline_mape", "improvement", "r2", "tier"},
+             "mase", "baseline_mase", "champion_mae", "champion_mape", "r2", "tier"},
         )
 
     def test_champion_self_description_columns_populated(self):
@@ -180,13 +180,15 @@ class TestBuildSectorQualityTable(unittest.TestCase):
         row = df[df["sector_code"] == "T001081"].iloc[0]
         self.assertEqual(row["model_type"], "Ridge")
         self.assertEqual(row["feature_groups"], '["all_survivors"]')
+        self.assertEqual(row["baseline_mase"], 1.00)
+        self.assertEqual(row["champion_mae"], 0.13)  # stakeholder metric (pp), from the mae tag
 
-    def test_tiers_benchmarked_against_baseline(self):
+    def test_tiers_assigned_on_mase(self):
         df = self._build()
         tier = dict(zip(df["sector_code"], df["tier"]))
-        # 0.05 vs 0.07 → 28.6% better → Good
+        # MASE 0.70 ≤ 0.90 → Good
         self.assertEqual(tier["T001081"], "Good")
-        # champion == baseline (no lift) → Poor
+        # MASE 1.10 ≥ 1.0 (loses to the naive) → Poor
         self.assertEqual(tier["301000"], "Poor")
 
     def test_sound_result_sectors_lists_good_tier(self):
@@ -217,7 +219,7 @@ class TestSectorHierarchyStructure(unittest.TestCase):
         # leading attributes are present on every node
         child = tree["children"][0]
         for key in ["sector_code", "sbi_level", "model_family", "model_type",
-                    "champion_mape", "baseline_mape", "improvement", "tier"]:
+                    "mase", "baseline_mase", "champion_mape", "tier"]:
             self.assertIn(key, child)
         json.dumps(tree)  # must not raise — JSON-serializable (NaN → None)
 
@@ -229,7 +231,8 @@ class TestSectorHierarchyStructure(unittest.TestCase):
             self.assertEqual(n, len(enriched))
             loaded = load_sector_performance(db)
             self.assertEqual(set(loaded["sector_code"]), set(enriched["sector_code"]))
-            for col in ["model_type", "feature_groups", "tier", "improvement", "sbi_level"]:
+            for col in ["model_type", "feature_groups", "tier", "mase", "baseline_mase",
+                        "champion_mae", "sbi_level"]:
                 self.assertIn(col, loaded.columns)
 
     def test_write_is_idempotent_replace(self):
@@ -297,7 +300,7 @@ class TestToTreeNesting(unittest.TestCase):
         tree = to_tree(_cbs_hierarchy_df())
         node = _find(tree, "307610")
         for key in ["sector_code", "sbi_level", "model_family", "model_type",
-                    "champion_mape", "baseline_mape", "improvement", "tier"]:
+                    "mase", "baseline_mase", "champion_mape", "tier"]:
             self.assertIn(key, node)
 
     def test_synthetic_root_when_no_total(self):
@@ -339,19 +342,19 @@ class TestBuildExperimentMatrix(unittest.TestCase):
             "model_family":  ["Ridge", "Ridge", "Baseline", "Baseline", "Linear"],
             "feature_group": ["all_survivors", "all_survivors", "discovery", "discovery", "all_survivors"],
             "sector":        ["A", "B", "A", "B", "A"],
-            "mape":          [0.05, 0.07, 0.06, 0.06, 0.20],
+            "mase":          [0.50, 0.70, 0.60, 0.60, 1.20],
         })
 
-    def test_median_mape_and_sector_wins(self):
-        mape, wins = build_experiment_matrix(self._runs())
-        self.assertAlmostEqual(mape.loc["Ridge", "all_survivors"], 0.06)   # median(.05,.07)
-        self.assertEqual(wins.loc["Ridge", "all_survivors"], 1)            # sector A best
+    def test_median_mase_and_sector_wins(self):
+        mase, wins = build_experiment_matrix(self._runs())
+        self.assertAlmostEqual(mase.loc["Ridge", "all_survivors"], 0.60)   # median(.50,.70)
+        self.assertEqual(wins.loc["Ridge", "all_survivors"], 1)            # sector A best (lowest MASE)
         self.assertEqual(wins.loc["Baseline", "discovery"], 1)            # sector B best
         self.assertEqual(wins.to_numpy().sum(), 2)                         # one win per sector
 
     def test_empty_runs_return_empty(self):
-        mape, wins = build_experiment_matrix(pd.DataFrame())
-        self.assertTrue(mape.empty and wins.empty)
+        mase, wins = build_experiment_matrix(pd.DataFrame())
+        self.assertTrue(mase.empty and wins.empty)
 
 
 class TestPerHorizonMape(unittest.TestCase):
@@ -418,8 +421,8 @@ class TestNarrativeMarkdown(unittest.TestCase):
         mock_perf.return_value = pd.DataFrame([{
             "sector_code": "T001081", "sbi_title": "All industries",
             "model_family": "RidgeDeseason_Reduced", "model_type": "Recursive",
-            "champion_mape": 0.0566, "baseline_mape": 0.0729,
-            "improvement": 0.2229, "r2": -0.38, "tier": "Good",
+            "mase": 0.776, "baseline_mase": 1.0, "champion_mae": 0.13,
+            "champion_mape": 0.0566, "r2": -0.38, "tier": "Good",
         }])
         forecasts = pd.DataFrame({
             "sector_code": ["T001081"], "model_family": ["RidgeDeseason_Reduced"],
@@ -429,7 +432,8 @@ class TestNarrativeMarkdown(unittest.TestCase):
             md = build_narrative_markdown(eval_db_path="unused.db")
         self.assertIn("1 Good", md)
         self.assertIn("RidgeDeseason_Reduced", md)
-        self.assertIn("22.29%", md)
+        self.assertIn("0.776", md)       # MASE rendered (comparison metric)
+        self.assertIn("0.13 pp", md)     # MAE rendered (stakeholder metric, percentage points)
         self.assertIn("2025-12-31", md)
         self.assertIn("5.74%", md)
 

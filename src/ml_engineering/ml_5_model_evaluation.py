@@ -54,16 +54,23 @@ Per-row prediction logging
 --------------------------
 Every individual (origin, horizon) prediction is stored in
 ``model_predictions`` with sector_code, origin_date, target_date, horizon,
-y_true, y_pred, and the new ``fold_set`` column ("inner" or "outer").
+y_true, y_pred, and the ``fold_set`` column ("inner" or "outer").
 
-REQUIRES
---------
-* ``ModelPredictionRecord`` (in model_configs.py) must have a ``fold_set``
-  column.  See ``model_configs_fold_set_patch.py`` for the patch.
-* If you already have a populated ``model_predictions`` table, run the
-  migration (DROP TABLE or ALTER TABLE) before re-running the pipeline.
-  The orchestrator's ``_ensure_eval_db`` will fail-fast if the column is
-  missing.
+Who consumes the inner/outer split
+----------------------------------
+The split is NOT vestigial.  ``run_pipeline`` deliberately does not call the
+variant-selection loader (a single-estimator run has nothing to select between —
+cross-family selection is handled later by the Step-6 champion/challenger gate),
+but the ``fold_set`` label is consumed by:
+
+* this module — the headline aggregate metrics use OUTER folds only;
+* ``m_sector_quality.per_horizon_mape`` + ``m_model_viz.plot_predicted_vs_actual``
+  — the report filters to OUTER folds for the honest view;
+* ``m_pipeline_loader`` (a standalone cross-method-comparison CLI) — uses INNER
+  folds to PICK a variant per sector and reports OUTER as canonical.
+
+``ModelPredictionRecord`` already declares the ``fold_set`` column; the eval DB
+is rebuilt from the ORM by ``_ensure_eval_db`` (no manual migration needed).
 """
 import math
 from typing import Any, Dict, List, Optional, Tuple
@@ -239,8 +246,8 @@ class ModelEvaluator:
         f_log(
             f"Evaluation ({diagnostics['n_inner']} inner + {diagnostics['n_outer']} outer origins, "
             f"{_FH_STEPS}Q each) | "
-            f"OUTER: R²={metrics['r2']:.4f} MAE={metrics['mae']:.4f} RMSE={metrics['rmse']:.4f} | "
-            f"INNER MAE (diag)={diagnostics['mae_inner']:.4f} | "
+            f"OUTER: MASE={metrics['mase']:.4f} MAPE={metrics['mape']:.4f} "
+            f"R²={metrics['r2']:.4f} MAE={metrics['mae']:.4f} RMSE={metrics['rmse']:.4f} | "
             f"per-row predictions saved: {len(pred_records)}",
             c_type="success",
         )
@@ -261,6 +268,7 @@ class ModelEvaluator:
         record = ModelEvaluationRecord(
             run_id=run_id,
             model_name=model_name,
+            mase=metrics["mase"],
             r2=metrics["r2"],
             mae=metrics["mae"],
             mape=metrics["mape"],
@@ -437,31 +445,120 @@ def _walk_forward_metrics(
         if inner_y_true else float("nan")
     )
 
+    # --- MASE: THE comparison metric (scale-free, baseline-aware) ---
+    # MASE = MAE / in-sample MAE of the seasonal-naive forecast (m=4 quarters).
+    # <1 beats the seasonal naive; lower is better.  The scaler is computed on
+    # the training window (y_train) only — never the forecast/test rows.
+    scaler = _seasonal_naive_mae(y_train, sp=_FH_STEPS)
+    mase = (
+        float(mae / scaler)
+        if (math.isfinite(mae) and math.isfinite(scaler) and scaler > 0)
+        else float("nan")
+    )
+    mase_inner_diag = (
+        float(mae_inner_diag / scaler)
+        if (math.isfinite(mae_inner_diag) and math.isfinite(scaler) and scaler > 0)
+        else float("nan")
+    )
+
     # --- Log to MLflow ---
     with mlflow.start_run(run_id=run_id):
         # Evaluation-honesty lineage: how forecast-window X was supplied.
         mlflow.log_param("x_future_mode", x_future_mode)
         mlflow.log_metrics({
-            # Headline = OUTER FOLDS (honest).  MAPE is the primary champion
-            # gate metric (ADR-001) and the leading indicator in the MLflow UI.
+            # Headline = OUTER FOLDS (honest).  MASE is THE champion-gate metric
+            # (scale-free, comparable across sectors); MAPE/R²/MAE/RMSE are kept
+            # informative.
+            "mean_absolute_scaled_error":     mase,
             "mean_absolute_percentage_error": mape,
             "r2_score":                r2,
             "mean_absolute_error":     mae,
             "root_mean_squared_error": rmse,
             # Diagnostic / provenance
+            "mase_inner_diagnostic":   mase_inner_diag,
             "mae_inner_diagnostic":    mae_inner_diag,
+            "seasonal_naive_mae":      scaler,
             "n_inner_origins":         float(n_inner_actual),
             "n_outer_origins":         float(n_outer_actual),
             "n_inner_predictions":     float(len(inner_y_true)),
             "n_outer_predictions":     float(len(outer_y_true)),
         })
+        # Consolidate the evaluation data INTO MLflow as table artifacts (the run's
+        # "Evaluation" tab + cross-run table comparison), so the actual-vs-predicted
+        # rows and the metric breakdown live alongside the metrics — not only in the
+        # eval DB's model_predictions.
+        preds_tbl, metrics_tbl = _build_eval_tables(
+            pred_records, mase, mape, r2, mae, rmse, mae_inner_diag,
+        )
+        if not preds_tbl.empty:
+            mlflow.log_table(preds_tbl, artifact_file="eval/walk_forward_predictions.json")
+        mlflow.log_table(metrics_tbl, artifact_file="eval/metrics_summary.json")
 
     diagnostics = {
         "mae_inner":  mae_inner_diag,
         "n_inner":    n_inner_actual,
         "n_outer":    n_outer_actual,
     }
-    return {"r2": r2, "mae": mae, "mape": mape, "rmse": rmse}, pred_records, diagnostics
+    return {"mase": mase, "r2": r2, "mae": mae, "mape": mape, "rmse": rmse}, pred_records, diagnostics
+
+
+def _seasonal_naive_mae(y_train, sp: int = 4) -> float:
+    """In-sample MAE of the seasonal-naive forecast — the MASE scaler.
+
+    ``mean |y_t - y_{t-sp}|`` over the TRAINING window (sp=4 = same quarter last
+    year for quarterly data).  Returns NaN if the window is too short.
+    """
+    y = np.asarray(y_train, dtype=float)
+    if len(y) <= sp:
+        return float("nan")
+    return float(np.mean(np.abs(y[sp:] - y[:-sp])))
+
+
+def _build_eval_tables(
+    pred_records: List[Dict[str, Any]],
+    mase: float, mape: float, r2: float, mae: float, rmse: float, mae_inner: float,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Build the two MLflow eval table artifacts from walk-forward output.
+
+    Returns ``(predictions_df, metrics_df)``:
+
+    * ``predictions_df`` — one row per (origin, horizon, fold_set) carrying
+      ``y_true`` / ``y_pred`` plus derived ``abs_error`` / ``abs_pct_error`` (the
+      rich actual-vs-predicted view the Evaluation tab renders).
+    * ``metrics_df`` — tidy ``scope / metric / value`` rows: the honest outer-fold
+      headline (MASE — THE metric — + MAPE/R²/MAE/RMSE), the inner-fold MAE
+      diagnostic, and per-horizon outer MAPE — the cross-run comparison.
+
+    Pure (no MLflow/IO) so it is unit-testable; the caller logs both via
+    ``mlflow.log_table``.
+    """
+    preds = pd.DataFrame(pred_records)
+    if not preds.empty:
+        preds = preds.copy()
+        preds["origin_date"] = preds["origin_date"].astype(str)
+        preds["target_date"] = preds["target_date"].astype(str)
+        preds["abs_error"] = (preds["y_true"] - preds["y_pred"]).abs()
+        denom = preds["y_true"].abs().replace(0.0, np.nan)
+        preds["abs_pct_error"] = preds["abs_error"] / denom
+
+    rows: List[Dict[str, Any]] = [
+        {"scope": "outer", "metric": "MASE", "value": mase},
+        {"scope": "outer", "metric": "MAPE", "value": mape},
+        {"scope": "outer", "metric": "R2",   "value": r2},
+        {"scope": "outer", "metric": "MAE",  "value": mae},
+        {"scope": "outer", "metric": "RMSE", "value": rmse},
+        {"scope": "inner", "metric": "MAE",  "value": mae_inner},
+    ]
+    if not preds.empty and "fold_set" in preds.columns:
+        outer = preds[preds["fold_set"] == "outer"]
+        for h, grp in outer.groupby("horizon"):
+            valid = grp["abs_pct_error"].dropna()
+            if len(valid):
+                rows.append({
+                    "scope": f"outer_h{int(h)}", "metric": "MAPE",
+                    "value": float(valid.mean()),
+                })
+    return preds, pd.DataFrame(rows)
 
 
 def _predict_origin(

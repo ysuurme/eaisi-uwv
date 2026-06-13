@@ -55,7 +55,7 @@ uv run main.py master_data_ml_preprocessed linear - compensation,working_conditi
 uv run main.py --refresh-data
 ```
 
-**Available model keys:** `baseline`, `structural_linear`, `linear`, `ridge`, `elasticnet`, `random_forest`, `gradient_boosting`, `hist_gbr`, `pls`
+**Available model keys:** `baseline`, `autoets`, `stl_ets`, `chronos_bolt`, `ridge`, `random_forest`, `ridge_deseason` (curated comparison set — see the Estimator Catalog below)
 
 ### 3. Track Results (MLflow)
 The pipeline is "Zero-Artifact"; all results are stored in `data/4_eval/eval_data.db`. Launch the UI to view metrics, tuning grids, and model signatures.
@@ -68,7 +68,13 @@ uv run mlflow-ui
 
 🌐 **Open**: [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
-All runs land in the `master_SickLeave_4Q` experiment, tagged with `sector` and `forecast_horizon=4Q` for easy cross-sector comparison. **MAPE** is the primary metric and quality gate; each sector has one registered model whose `@prod` alias is its current champion (the lowest-MAPE model seen so far).
+All runs land in the `master_SickLeave_4Q` experiment, tagged with `sector` and `forecast_horizon=4Q` for easy cross-sector comparison. The metric set is deliberately small and interpretable:
+
+- **MAE** (in percentage points) — the primary **stakeholder** metric: how far off, on average, in the same units as the target (sick-leave %).
+- **MAPE** — the foundational percentage-error metric (relative `|y−ŷ|/|y|`).
+- **MASE** (Mean Absolute Scaled Error — outer-fold MAE scaled by the in-sample seasonal-naive m=4 MAE) — **THE comparison metric** and quality gate: scale-free and comparable across sectors with different baseline difficulty, lower is better, and **MASE < 1 beats the seasonal naive**.
+
+Each sector has one registered model whose `@prod` alias is its current champion (the lowest-MASE model seen so far); R²/RMSE are recorded alongside as secondary diagnostics.
 
 ### 4. Run Tests
 ```bash
@@ -241,9 +247,10 @@ This project follows a modular **MLOps Level 0** architecture structured into se
 
 ### Forecast Paradigm
 All models operate as **4-quarter-ahead time-series forecasters**:
-- The test set is always the last 4 quarters (1 year = the forecast horizon)
-- The baseline and all competing models are evaluated on held-out future quarters
-- Hyperparameter tuning uses `ExpandingWindowSplitter(fh=[1,2,3,4], step_length=4, initial_window=40)` — one full year per CV fold, evaluating all 4 ahead-steps simultaneously
+- The forecast horizon is **4 quarters** (1 year): every origin forecasts 4 quarters ahead.
+- The held-out **evaluation window is the last 20 quarters** (`n_test_points=20`), evaluated by **walk-forward over 5 rolling origins** (each origin refits on the expanding history and forecasts the next 4 quarters). These 5 origins are split into inner (variant-selection) and outer (honest) folds; headline metrics use the **outer** folds only.
+- The baseline and all competing models are evaluated identically on this held-out window, with production-honest future X (no covariate leakage).
+- Hyperparameter tuning runs on the **training set only** via `ExpandingWindowSplitter(fh=[1,2,3,4], step_length=4, initial_window=40)` — one full year per CV fold, evaluating all 4 ahead-steps simultaneously.
 
 ### Operational Modes
 Every pipeline run operates on exactly one quarterly time series (1 row per quarter):
@@ -256,19 +263,19 @@ Every pipeline run operates on exactly one quarterly time series (1 row per quar
 
 ### Estimator Catalog (`model_configs.py`)
 
-| Key | Estimator | Tunable |
-|-----|-----------|---------|
-| `baseline` | `SectorQuarterRollingMean(n_years=3)` | No |
-| `structural_linear` | `make_reduction(Pipeline[Scaler→Ridge], window_length=4)` | `window_length`, `alpha` |
-| `linear` | `make_reduction(Pipeline[Scaler→LinearRegression], window_length=4)` | `window_length` |
-| `ridge` | `make_reduction(Pipeline[Scaler→Ridge], window_length=4)` | `window_length`, `alpha` |
-| `elasticnet` | `make_reduction(Pipeline[Scaler→ElasticNet], window_length=4)` | `window_length`, `alpha`, `l1_ratio` |
-| `random_forest` | `make_reduction(RandomForestRegressor, window_length=12)` | `window_length`, `n_estimators`, `max_depth`, `min_samples_leaf` |
-| `gradient_boosting` | `make_reduction(GradientBoostingRegressor, window_length=12)` | `window_length`, `n_estimators`, `learning_rate` |
-| `hist_gbr` | `make_reduction(HistGradientBoostingRegressor, window_length=12)` | `window_length`, `max_iter`, `max_depth`, `learning_rate`, `min_samples_leaf` |
-| `pls` | `make_reduction(Pipeline[Scaler→PLS1D], window_length=4)` | `window_length`, `n_components` |
+A curated 7-model comparison set spanning the univariate-vs-multivariate question (`chronos_bolt` added as a foundation-model contender). Feature groups resolve from `data/feature_selection/feature_catalog.json` (the single source of truth; `all_survivors` = the selected features).
 
-Linear-family estimators (`structural_linear`, `linear`, `ridge`, `elasticnet`, `pls`) are wrapped in a `StandardScaler` pipeline; tree-family estimators are scale-invariant and are not.
+| Key | Estimator | Uses selected features? | Tunable |
+|-----|-----------|---|---------|
+| `baseline` | `SectorQuarterRollingMean(n_years=3)` | — (reference, run per sector) | No |
+| `autoets` | `AutoETS(sp=4)` | ❌ univariate (ignores X) | ETS error/trend/seasonal |
+| `stl_ets` | `QuarterlyPeriodForecaster(STLForecaster + ETS)` | ❌ univariate (ignores X) | STL `seasonal`/`robust`, trend damping |
+| `chronos_bolt` | `ChronosForecaster(amazon/chronos-bolt-base)` — zero-shot foundation model | ❌ univariate (ignores X) | none (zero-shot) |
+| `ridge` | `make_reduction(Pipeline[Scaler→Ridge], window_length=4)` on `all_survivors` | ✅ multivariate linear | `window_length`, `alpha` |
+| `random_forest` | `make_reduction(RandomForestRegressor, window_length=12)` on `all_survivors` | ✅ multivariate non-linear | `window_length`, `n_estimators`, `max_depth`, `min_samples_leaf` |
+| `ridge_deseason` | `QuarterlyPeriodForecaster(Deseasonalizer(sp=4) → Ridge reducer)` on `all_survivors` | ✅ multivariate (deseasonalized) | `window_length`, `alpha` |
+
+`baseline`/`autoets`/`stl_ets`/`chronos_bolt` are univariate — they forecast the sick-leave rate from its own past only, so feature selection does not affect them. `chronos_bolt` is a zero-shot Amazon Chronos-Bolt foundation model (pretrained T5; no training on our data — `fit` stores the context, `predict` returns the median quantile; requires `torch` + `chronos`, runs on CPU). `ridge`/`random_forest`/`ridge_deseason` are the multivariate ML models that leverage the selected CBS drivers, testing whether the exogenous features add value beyond the target's history. Linear-family estimators (`ridge`, `ridge_deseason`) use a `StandardScaler` pipeline; `random_forest` is scale-invariant.
 
 **`SectorQuarterRollingMean`**: Domain-specific baseline. For each quarter Q, predicts the mean of Q from the previous 3 years using `shift(1).rolling_mean(window_size=3, min_samples=3).over([quarter])`. Requires 3 full prior-year observations before producing a prediction (matching the CBS notebook approach). Because `shift(1)` within the same-quarter group equals a 1-year shift, this is inherently a 4-quarter-ahead forecast.
 
@@ -289,7 +296,7 @@ Linear-family estimators (`structural_linear`, `linear`, `ridge`, `elasticnet`, 
 - Enforces schema, zero-nulls, float64 dtypes, and `period_enddate` parseability.
 
 **3. Data Preparation (`ml_3_data_preparation.py`)**
-- Temporal train/test split: last `n_test=4` quarters (1 year) held out as test set.
+- Temporal train/test split: the last `n_test=20` quarters (the walk-forward evaluation window) are held out; everything before the cutoff is the training set.
 - Sets a `DatetimeIndex` for sktime compatibility.
 - Outputs `X_train, X_test, y_train, y_test` + lineage metadata.
 
@@ -300,14 +307,14 @@ Linear-family estimators (`structural_linear`, `linear`, `ridge`, `elasticnet`, 
 
 **5. Model Evaluation (`ml_5_model_evaluation.py`)**
 - Walk-forward (rolling-origin) evaluation with nested inner/outer folds; headline metrics are computed on the honest **outer** folds.
-- Computes **MAPE** (primary), R², MAE, RMSE on the 4-quarter-ahead forecasts and logs them to MLflow. Per-row predictions are persisted for cross-model comparison.
+- Computes **MASE** (THE comparison metric — outer-fold MAE scaled by the in-sample seasonal-naive m=4 MAE), **MAE** (percentage points — the stakeholder metric), **MAPE** (the percentage-error fundament), plus R², RMSE on the 4-quarter-ahead forecasts and logs them to MLflow (MASE as `mean_absolute_scaled_error`). Per-row predictions are persisted for cross-model comparison.
 
 **6. Model Validation & Registry (`ml_6_model_validation.py`)**
-- **MAPE champion/challenger gate**: one registered model per sector (sector-keyed name). A challenger is promoted to `@prod` only if its MAPE is finite and strictly lower than the incumbent champion's MAPE — or seeded unconditionally when no champion exists yet. Losing runs stay diagnosable (`passed_gate=false`) but are not registered, so the registry only grows on genuine improvement.
-- R² is recorded alongside (optional `r2_floor`, disabled by default). The promoted version **self-describes** via tags `mape` / `r2` / `model_family` / `model_type` / `feature_groups`, so the registry alone tells you each champion's accuracy, algorithm, and the config features it used.
+- **MASE champion/challenger gate**: one registered model per sector (sector-keyed name). A challenger is promoted to `@prod` only if its MASE is finite and strictly lower than the incumbent champion's MASE — or seeded unconditionally when no champion exists yet. An optional `max_mase` ceiling (default disabled) additionally requires `MASE < max_mase` (e.g. 1.0 = must beat the seasonal naive). Losing runs stay diagnosable (`passed_gate=false`) but are not registered, so the registry only grows on genuine improvement.
+- R² is recorded alongside (optional `r2_floor`, disabled by default). The promoted version **self-describes** via tags `mase` / `mae` / `mape` / `r2` / `model_family` / `model_type` / `feature_groups`, so the registry alone tells you each champion's comparison score, stakeholder accuracy (pp), algorithm, and the config features it used.
 
 ### Sector Performance Read-Model (`m_sector_quality.py`)
-MLflow is the single source of truth (each sector's `@prod` champion self-describes). For visualizations and downstream apps, `refresh_sector_performance()` materialises a denormalised **`sector_performance`** table in the eval DB — a refresh-only projection that joins each champion with the baseline MAPE and the CBS SBI hierarchy:
+MLflow is the single source of truth (each sector's `@prod` champion self-describes). For visualizations and downstream apps, `refresh_sector_performance()` materialises a denormalised **`sector_performance`** table in the eval DB — a refresh-only projection that joins each champion with the baseline MASE and the CBS SBI hierarchy:
 
 | Concern | Function |
 |---|---|
@@ -317,4 +324,4 @@ MLflow is the single source of truth (each sector's `@prod` champion self-descri
 | Read it for charts/apps | `load_sector_performance()` |
 | JSON hierarchy tree (champion · model_type · sector · performance) | `to_tree()` |
 
-Tiers are **benchmarked against the baseline model** (`SectorQuarterRollingMean`): a sector is *Good* only when its champion beats the naive baseline's MAPE by ≥ 10%, *Poor* when it cannot beat it. Charts are rendered by `m_model_viz.py` (`plot_sector_leaderboard`, `plot_predicted_vs_actual`).
+Tiers are assigned on **MASE**: *Good* when MASE ≤ 0.90 (clear skill over the seasonal naive), *Medium* when 0.90 < MASE < 1.0 (beats the naive modestly), *Poor* when MASE ≥ 1.0 (no lift over the naive) or non-finite. The baseline model's MASE (`SectorQuarterRollingMean`) is carried as an informative reference column. Charts are rendered by `m_model_viz.py` (`plot_sector_leaderboard`, `plot_predicted_vs_actual`).

@@ -33,21 +33,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sklearn.base import BaseEstimator, RegressorMixin, clone
-from sklearn.cross_decomposition import PLSRegression
-from sklearn.ensemble import (
-    GradientBoostingRegressor,
-    HistGradientBoostingRegressor,
-    RandomForestRegressor,
-)
-from sklearn.linear_model import LinearRegression, Ridge, ElasticNet
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sktime.forecasting.base import BaseForecaster
 from sktime.forecasting.compose import TransformedTargetForecaster, make_reduction
 from sktime.forecasting.ets import AutoETS
 from sktime.forecasting.naive import NaiveForecaster
-from sktime.forecasting.trend import PolynomialTrendForecaster, STLForecaster
-from sktime.transformations.series.detrend import Deseasonalizer, Detrender
+from sktime.forecasting.trend import STLForecaster
+from sktime.transformations.series.detrend import Deseasonalizer
 from sqlalchemy import String, Float, Integer, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -89,6 +84,7 @@ class ModelEvaluationRecord(Base):
 
     run_id: Mapped[str] = mapped_column(String, primary_key=True)
     model_name: Mapped[Optional[str]] = mapped_column(String)
+    mase: Mapped[Optional[float]] = mapped_column(Float)  # THE comparison metric (seasonal-naive m=4)
     r2: Mapped[Optional[float]] = mapped_column(Float)
     mae: Mapped[Optional[float]] = mapped_column(Float)
     mape: Mapped[Optional[float]] = mapped_column(Float)
@@ -154,7 +150,7 @@ class SectorPerformance(Base):
 
     One row per SBI sector, materialised (refreshed) FROM the single source of
     truth — the MLflow registry champion (which self-describes model_family /
-    model_type / feature_groups / mape / r2), the baseline MAPE from
+    model_type / feature_groups / mase / mae / mape / r2), the baseline MASE from
     ``model_evaluations``, and the CBS SBI hierarchy (title + level).  This table
     is a projection: ``m_sector_quality.refresh_sector_performance`` is the only
     writer, so MLflow remains authoritative and this stays a clean, queryable
@@ -169,9 +165,10 @@ class SectorPerformance(Base):
     model_family:  Mapped[Optional[str]] = mapped_column(String)
     model_type:    Mapped[Optional[str]] = mapped_column(String)
     feature_groups: Mapped[Optional[str]] = mapped_column(String)
-    champion_mape: Mapped[Optional[float]] = mapped_column(Float)
-    baseline_mape: Mapped[Optional[float]] = mapped_column(Float)
-    improvement:   Mapped[Optional[float]] = mapped_column(Float)
+    mase:          Mapped[Optional[float]] = mapped_column(Float)  # THE comparison metric (seasonal-naive m=4)
+    baseline_mase: Mapped[Optional[float]] = mapped_column(Float)  # baseline model's MASE (reference)
+    champion_mae:  Mapped[Optional[float]] = mapped_column(Float)  # primary stakeholder metric (percentage points)
+    champion_mape: Mapped[Optional[float]] = mapped_column(Float)  # foundational percentage-error metric
     r2:            Mapped[Optional[float]] = mapped_column(Float)
     tier:          Mapped[Optional[str]] = mapped_column(String)
     refreshed_at:  Mapped[Optional[str]] = mapped_column(DateTime, server_default=func.now())
@@ -339,28 +336,6 @@ class SectorQuarterRollingMean(BaseEstimator, RegressorMixin):
         return merged["_pred"].fillna(self._global_mean).to_numpy(dtype=float)
 
 
-class PLS1D(PLSRegression):
-    """``PLSRegression`` that returns 1-D predictions for single-target y.
-
-    sklearn's PLSRegression.predict returns shape (n_samples, n_targets), so
-    for our 1-D quarterly sick-leave target it returns (n_samples, 1).  The
-    sktime reducer wraps the inner regressor and expects 1-D output from
-    ``predict``; passing a 2-D array breaks downstream metric computations
-    and concatenation in walk-forward CV.
-
-    This thin subclass squeezes the trailing singleton dimension when
-    present.  It inherits everything else — ``fit``, params, ``set_params`` —
-    so it composes correctly inside ``Pipeline`` and ``make_reduction``,
-    and ``sklearn.base.clone`` works without changes.
-    """
-
-    def predict(self, X, copy=True):
-        y_pred = super().predict(X, copy=copy)
-        if y_pred.ndim > 1 and y_pred.shape[1] == 1:
-            return y_pred.ravel()
-        return y_pred
-
-
 class QuarterlyPeriodForecaster(BaseForecaster):
     """Runs a wrapped sktime forecaster on a quarterly PeriodIndex.
 
@@ -426,44 +401,104 @@ def _to_period(data):
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 challenger builders — deseasonalize/detrend the target before the
-# sklearn reducer (the notebook hypothesis: removing seasonality/trend makes
-# feature-pipeline ML competitive with STL+ETS / AutoETS).  Decomposition
-# transformers need a frequency-aware index, so the chain is wrapped in
-# QuarterlyPeriodForecaster (PeriodIndex internally).  Factored so the three
-# deseason arms (full / structural / labor ablations) share one definition.
+# Chronos-Bolt — zero-shot univariate foundation-model forecaster
+# ---------------------------------------------------------------------------
+# Amazon Chronos-Bolt is a pretrained T5 time-series model: there is NO training
+# on our data — ``fit`` stores the target context, ``predict`` runs a forward
+# pass and returns the median (q=0.5) quantile.  Univariate: exogenous X is
+# ignored (like the ETS models).  The multi-hundred-MB pipeline is loaded ONCE
+# per process and cached, so cloning + the walk-forward refit across the
+# 39-sector sweep reloads nothing and only the light (model_id, device, context)
+# state is pickled for MLflow.  ``chronos``/``torch`` are imported lazily so
+# importing this module stays light and never downloads weights.
+
+_CHRONOS_CACHE: Dict[str, Any] = {}
+
+
+def _load_chronos(model_id: str, device: str):
+    """Load + cache the Chronos pipeline (one load per process; lazy import)."""
+    key = f"{model_id}@{device}"
+    if key not in _CHRONOS_CACHE:
+        from chronos import BaseChronosPipeline
+        _CHRONOS_CACHE[key] = BaseChronosPipeline.from_pretrained(model_id, device_map=device)
+    return _CHRONOS_CACHE[key]
+
+
+class ChronosForecaster(BaseForecaster):
+    """Zero-shot univariate forecaster wrapping Amazon Chronos-Bolt.
+
+    A pretrained foundation model — no training on our data: ``_fit`` retains the
+    observed target as the forecast context, ``_predict`` runs Chronos on that
+    context and returns the median (q=0.5) quantile for the requested horizon.
+    Exogenous X is ignored (univariate, like the ETS models); ``param_grid`` is
+    empty (nothing to tune).  The pipeline is module-cached via ``_load_chronos``
+    so ``sklearn.base.clone`` and the walk-forward refit are cheap, and only
+    ``model_id`` / ``device`` / the stored context are pickled — never the weights.
+
+    Bolt is a quantile-regression model (no sampling) → the median forecast is
+    deterministic, keeping the pipeline reproducible.
+    """
+
+    _tags = {
+        "scitype:y": "univariate",
+        "y_inner_mtype": "pd.Series",
+        "X_inner_mtype": "pd.DataFrame",
+        "ignores-exogeneous-X": True,
+        "requires-fh-in-fit": False,
+        "handles-missing-data": False,
+        "capability:pred_int": False,
+    }
+
+    def __init__(self, model_id: str = "amazon/chronos-bolt-base", device: str = "cpu"):
+        self.model_id = model_id
+        self.device = device
+        super().__init__()
+
+    def _fit(self, y: pd.Series, X: Optional[pd.DataFrame] = None, fh=None):
+        # Zero-shot: retain the observed target as the forecast context.
+        self._context = y.astype("float32")
+        return self
+
+    def _predict(self, fh, X: Optional[pd.DataFrame] = None) -> pd.Series:
+        import torch
+
+        rel = [int(step) for step in fh.to_relative(self.cutoff)]
+        pipeline = _load_chronos(self.model_id, self.device)
+        quantiles, _mean = pipeline.predict_quantiles(
+            inputs=torch.tensor(self._context.to_numpy(dtype="float32")),
+            prediction_length=max(rel),
+            quantile_levels=[0.5],
+        )
+        median = quantiles[0, :, 0].cpu().numpy()  # [prediction_length]
+        abs_index = fh.to_absolute(self.cutoff).to_pandas()
+        values = [float(median[step - 1]) for step in rel]
+        return pd.Series(values, index=abs_index, name=self._context.name)
+
+
+# ---------------------------------------------------------------------------
+# Deseasonalized feature-ML builder — remove quarterly seasonality from the
+# target before the multivariate Ridge reducer (the notebook hypothesis:
+# deseasonalizing makes feature-pipeline ML competitive with STL+ETS / AutoETS).
+# Deseasonalizer needs a frequency-aware index, so the chain is wrapped in
+# QuarterlyPeriodForecaster (PeriodIndex internally).
 # ---------------------------------------------------------------------------
 
-def _ridge_recursive_reducer():
-    """A fresh Ridge-in-scaler recursive lag-window reducer."""
-    return make_reduction(
+def _deseason_ridge():
+    """Deseasonalized multivariate Ridge reducer on the selected features.
+
+    ``Deseasonalizer(sp=4)`` strips quarterly seasonality from the target; the
+    Ridge lag-window reducer then learns on the residual using the catalog
+    features, and ``QuarterlyPeriodForecaster`` re-adds the frequency the
+    transformer needs.
+    """
+    reducer = make_reduction(
         Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
         window_length=4, strategy="recursive",
     )
-
-
-def _deseason_ridge(detrend: bool = False):
-    """Deseasonalized (optionally + linearly detrended) Ridge reducer.
-
-    ``Deseasonalizer(sp=4)`` removes quarterly seasonality from the target;
-    with ``detrend=True`` a degree-1 ``Detrender`` also removes the linear
-    trend.  The Ridge lag-window reducer then learns on the residual, and
-    ``QuarterlyPeriodForecaster`` re-adds the frequency the transformers need.
-    """
-    steps = [("deseason", Deseasonalizer(sp=4))]
-    if detrend:
-        steps.append(("detrend", Detrender(PolynomialTrendForecaster(degree=1))))
-    steps.append(("reduce", _ridge_recursive_reducer()))
-    return QuarterlyPeriodForecaster(TransformedTargetForecaster(steps))
-
-
-#: Shared ≤16-combo grid for the deseason reducer arms (2 × 4 = 8 combos).
-#: Keys route window_length + Ridge alpha through the wrapper → transformed
-#: target → named ``reduce`` step → make_reduction → scaler pipeline → Ridge.
-_DESEASON_GRID = {
-    "forecaster__reduce__window_length": [4, 8],
-    "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
-}
+    return QuarterlyPeriodForecaster(TransformedTargetForecaster([
+        ("deseason", Deseasonalizer(sp=4)),
+        ("reduce", reducer),
+    ]))
 
 
 # ---------------------------------------------------------------------------
@@ -552,90 +587,56 @@ def load_feature_catalog(preset_path: Path) -> Dict[str, FeatureGroup]:
 
 
 # ---------------------------------------------------------------------------
-# FEATURE_CATALOG — loaded from preset JSON or hardcoded fallback
+# FEATURE_CATALOG — the SINGLE SOURCE OF TRUTH is the generated catalog file
+# data/feature_selection/feature_catalog.json (produced by --select-features).
+# There are NO hardcoded feature lists: named groups + ``all_survivors`` come
+# exclusively from that file.  A fresh checkout (no catalog yet) exposes only
+# ``structural_only`` until `python main.py --select-features` is run.
 # ---------------------------------------------------------------------------
 
-#: Canonical feature-catalog file inside DIR_FEATURE_SELECTION, generated by
-#: the feature-selection flow (``python main.py --select-features``).
+#: Canonical feature-catalog file inside DIR_FEATURE_SELECTION, generated by the
+#: feature-selection flow (``python main.py --select-features``).  This file is
+#: the single source of truth for which features each named group contains.
 _FEATURE_CATALOG_FILE: str = "feature_catalog.json"
 
-_HARDCODED_CATALOG: Dict[str, FeatureGroup] = {
-    "labor_volume": FeatureGroup(
-        name="labor_volume",
-        columns=[
-            "GewerkteUren_3_A045285_4000",
-            "GewerkteUren_3_A045285_3000",
-            "GewerkteUren_3_A045286_3000",
-            "GewerkteUren_3_A045286_4000",
-            "GewerkteUren_8_A045285_3000",
-            "GewerkteUren_8_A045286_3000",
-            "GewerkteUren_8_A045286_4000",
-            "GewerkteUren_5_A045285",
-            "GewerkteUrenPerWerkzamePersoon_4_A045285_4000",
-            "GewerkteUrenPerWerkzamePersoon_9_A045285_4000",
-            "GewerkteUrenPerWerkzamePersoon_9_A045285_3000",
-            "GewerkteUrenPerWerkzamePersoon_9_A045286_4000",
-            "GewerkteUrenPerBaan_10_A045285_3000",
-            "GewerkteUrenSeizoengecorrigeerd_6_A045285",
-        ],
-        source_table="85920NED",
-        description="Hours worked, hours per employed person, and hours per job by sector and category (85920NED).",
-    ),
-    "workforce": FeatureGroup(
-        name="workforce",
-        columns=[
-            "WerkzamePersonen_6_A045285_3000",
-            "WerkzamePersonen_7_A045285",
-            "WerkzamePersonen_7_A045286",
-            "WerkzamePersonenSeizoengecorrigeerd_9_A045286",
-            "Banen_7_A045285_4000",
-            "Banen_7_A045286_3000",
-            "Banen_2_A045286_4000",
-            "Banen_8_A045285",
-            "BanenSeizoengecorrigeerd_10_A045286",
-            "Banen_8_A045286",
-        ],
-        source_table="85920NED",
-        description="Number of jobs and employed persons, seasonally adjusted, by sector and category (85920NED).",
-    ),
-}
 
-# Meta-groups derived from the hardcoded named groups.  Added post-hoc because
-# FeatureGroup is frozen and cannot reference sibling entries during dict
-# construction.  Ensures the fallback path supports the same group names
-# (all_survivors, structural_only) as a preset-loaded catalog — otherwise
-# models referencing those groups would crash if the preset file is missing.
-_HARDCODED_CATALOG["all_survivors"] = FeatureGroup(
-    name="all_survivors",
-    columns=(
-        _HARDCODED_CATALOG["labor_volume"].columns
-        + _HARDCODED_CATALOG["workforce"].columns
-    ),
-    source_table="",
-    description="Hardcoded fallback: union of all named groups (labor_volume + workforce).",
-)
-_HARDCODED_CATALOG["structural_only"] = FeatureGroup(
-    name="structural_only",
-    columns=[],
-    source_table="",
-    description="Empty group; resolves to structural features only via ml_1 injection.",
-)
+def _structural_only_catalog() -> Dict[str, FeatureGroup]:
+    """Minimal catalog used ONLY when no ``feature_catalog.json`` exists yet.
 
-# Try loading the canonical catalog; fall back to hardcoded if the file
-# doesn't exist or is malformed.  A bad catalog file must never crash the
-# pipeline at import.
+    Contains just the ``structural_only`` meta-group (empty column list →
+    resolves to the structural features ml_1 injects).  Deliberately holds no
+    hardcoded CBS feature lists: named groups + ``all_survivors`` are produced
+    exclusively by feature selection, so univariate/structural models
+    (baseline / autoets / stl_ets / structural_linear) still run on a fresh
+    checkout, while multivariate models referencing ``all_survivors`` require
+    ``python main.py --select-features`` first.
+    """
+    return {
+        "structural_only": FeatureGroup(
+            name="structural_only", columns=[], source_table="",
+            description="Empty group; resolves to structural features only via ml_1 injection.",
+        )
+    }
+
+
+# Loaded from the canonical catalog at import; a missing/malformed file degrades
+# to structural_only (never crashes the import — feature selection itself must be
+# importable before the catalog exists).
 _catalog_path = DIR_FEATURE_SELECTION / _FEATURE_CATALOG_FILE
 FEATURE_CATALOG: Dict[str, FeatureGroup] = {}
 
 
 def reload_feature_catalog() -> None:
-    """(Re)populate ``FEATURE_CATALOG`` from the canonical catalog file.
+    """(Re)populate ``FEATURE_CATALOG`` from the canonical catalog file — the
+    single source of truth (``data/feature_selection/feature_catalog.json``).
 
     Mutates the module-level dict IN PLACE so existing imports (e.g.
     ``ml_1_data_extraction.FEATURE_CATALOG``) observe the refresh.  Called at
     import time and again by ``ml_orchestrator.run_feature_selection`` after a
     new catalog has been written, so a single process can select features and
-    train without re-importing.
+    train without re-importing.  When the file is absent or unreadable,
+    ``FEATURE_CATALOG`` falls back to ``structural_only`` ONLY — there are no
+    hardcoded feature lists.
     """
     if _catalog_path.exists():
         try:
@@ -649,18 +650,19 @@ def reload_feature_catalog() -> None:
             return
         except Exception as _exc:
             _logger.warning(
-                "Failed to load feature catalog %s: %s — using hardcoded fallback",
+                "Failed to load feature catalog %s: %s — limiting FEATURE_CATALOG "
+                "to 'structural_only'. Re-run `python main.py --select-features`.",
                 _catalog_path.name, _exc,
             )
     else:
         _logger.warning(
-            "FEATURE_CATALOG using hardcoded fallback (no catalog at %s) — "
-            "run `python main.py --select-features` to generate it from the "
-            "current gold dataset.",
+            "No feature catalog at %s — FEATURE_CATALOG limited to 'structural_only'. "
+            "Run `python main.py --select-features` to generate it from the gold "
+            "dataset (the single source of truth for features).",
             _catalog_path,
         )
     FEATURE_CATALOG.clear()
-    FEATURE_CATALOG.update(_HARDCODED_CATALOG)
+    FEATURE_CATALOG.update(_structural_only_catalog())
 
 
 reload_feature_catalog()
@@ -681,47 +683,47 @@ class ModelExperiment:
 
 
 class ModelConfiguration:
-    """Catalog of available estimator configurations.
+    """Curated catalog of estimator configurations for the sick-leave comparison.
 
-    Usage:
-        config = ModelConfiguration.get("baseline")
-        config.estimator  # SectorQuarterRollingMean()
-        config.feature_groups  # None = discovery mode
+    Seven models spanning the univariate-vs-multivariate question, each adding
+    distinct value (redundant families + exploratory ablations were pruned;
+    ``chronos_bolt`` added as a foundation-model contender):
 
-    Baseline:
-        SectorQuarterRollingMean — rolling 3-year same-quarter mean per SBI sector.
-        Domain-specific, interpretable, and leakage-free benchmark.
+    Baseline — ``baseline``:
+        ``SectorQuarterRollingMean`` (rolling 3-year same-quarter mean per
+        sector).  A leakage-free reference contender, run once per sector and
+        scored under the same walk-forward MASE as every model — shown as the
+        ``baseline_mase`` reference column.  (The MASE *denominator* itself is the
+        in-sample seasonal-naive m=4 MAE, computed in Step 5, not this model.)
 
-    Statistical forecasters (autoets / stl_ets):
-        Univariate sktime-native estimators — the model families that won the
-        notebook comparison study (STL+ETS mean MASE 0.93, AutoETS 1.17 vs
-        feature-pipeline 2.36 across 39 sectors).  They consume the target
-        history only: feature_groups=["structural_only"] passes structural X
-        which the estimators ignore.  STL-based composites require a
-        PeriodIndex and are wrapped in QuarterlyPeriodForecaster.
+    Univariate — ``autoets`` / ``stl_ets`` / ``chronos_bolt``:
+        Forecast the TARGET HISTORY ONLY — they ignore exogenous X
+        (``ignores-exogeneous-X=True``), so feature selection does not affect
+        them.  ``feature_groups=["structural_only"]`` passes structural X that
+        the estimators drop internally.  ``autoets`` / ``stl_ets`` are
+        sktime-native ETS (the notebook winners: STL+ETS MASE ≈ 0.93, AutoETS
+        ≈ 1.17; STL composites are wrapped in ``QuarterlyPeriodForecaster``).
+        ``chronos_bolt`` is a **zero-shot** Amazon Chronos-Bolt foundation model
+        (pretrained T5; no training on our data — ``fit`` stores the context,
+        ``predict`` returns the median quantile); ``param_grid={}``.
 
-    Reducers (sktime make_reduction):
-        Wraps sklearn regressors into recursive lag-window forecasters.
-        For linear-family models (linear / ridge / elasticnet / structural_linear)
-        the underlying regressor is wrapped in a sklearn Pipeline with a
-        StandardScaler step.  This adds an extra nesting level to param_grid
-        keys:  estimator__regressor__<param>  rather than  estimator__<param>.
-        Scaling is critical for L1/L2-penalised models on CBS data because raw
-        labour-volume features (hours, persons) dwarf scaled features in
-        magnitude and would otherwise hijack the regularisation budget.
-        Tree-family models (random_forest / hist_gbr) are scale-invariant and
-        are NOT wrapped in a scaler.
+    Multivariate ML — ``ridge`` / ``random_forest`` (on ``all_survivors``):
+        The models that actually LEVERAGE the carefully-selected CBS features
+        (lagged target + the feature_catalog.json survivors), via sktime
+        ``make_reduction`` recursive lag-window forecasters.  ``ridge`` is the
+        regularised linear option (scaler pipeline → param keys
+        ``estimator__regressor__alpha``); ``random_forest`` is the non-linear
+        option capturing feature interactions (scale-invariant, no scaler).
+        These test whether the exogenous drivers add value beyond the target's
+        own past.
 
-    Feature-ML challengers (Phase 4 — ridge_deseason* / ridge_direct):
-        Give the feature pipeline a fair shot at the seeded stat champions.
-        ``ridge_deseason`` / ``ridge_deseason_detrend`` remove quarterly
-        seasonality (and optionally the linear trend) from the target before the
-        Ridge reducer, wrapped in ``QuarterlyPeriodForecaster`` (the
-        decomposition transformers need a frequency-aware index).
-        ``ridge_direct`` swaps the recursive strategy for ``direct`` (one
-        regressor per horizon; fh required at fit).  The ``_structural`` /
-        ``_labor`` suffixes are feature-group ablations of the deseason mechanic.
-        ``ridge`` is the undeseasonalized control.
+    Deseasonalized feature-ML — ``ridge_deseason`` (on ``all_survivors``):
+        Strips quarterly seasonality from the target before the Ridge reducer
+        (wrapped in ``QuarterlyPeriodForecaster``) — the feature-ML arm that beat
+        the baseline for T001081.  ``ridge`` is its undeseasonalized control.
+
+    Feature groups resolve from ``data/feature_selection/feature_catalog.json``
+    (the single source of truth; ``all_survivors`` = the selected features).
     """
 
     _CATALOG: Dict[str, ModelExperiment] = {
@@ -765,31 +767,12 @@ class ModelConfiguration:
             feature_groups=["structural_only"],
             description="STL decomposition (quarterly) + ETS trend/residual components — sktime-native STL+ETS, the notebook comparison winner.",
         ),
-        "structural_linear": ModelExperiment(
-            name="StructuralLinear",
-            estimator=make_reduction(
-                Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
-                window_length=4, strategy="recursive",
-            ),
-            param_grid={
-                "window_length": [4, 8],
-                "estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
-            },
+        "chronos_bolt": ModelExperiment(
+            name="ChronosBolt_Stat",
+            estimator=ChronosForecaster(model_id="amazon/chronos-bolt-base", device="cpu"),
+            param_grid={},  # zero-shot foundation model — nothing to tune
             feature_groups=["structural_only"],
-            description="Diagnostic floor: Ridge on structural features only (trend, regime flags, temporal).",
-        ),
-        "linear": ModelExperiment(
-            name="LinearRegression_Reduced",
-            estimator=make_reduction(
-                Pipeline([("scaler", StandardScaler()), ("regressor", LinearRegression())]),
-                window_length=4, strategy="recursive",
-            ),
-            param_grid={"window_length": [4, 8]},
-            # all_survivors is the only group guaranteed non-empty across
-            # catalog regenerations; per-category feature sets are explicit
-            # ablation experiment keys, not baked into model entries.
-            feature_groups=["all_survivors"],
-            description="LinearRegression in scaler pipeline via make_reduction recursive lag-window forecaster.",
+            description="Zero-shot Amazon Chronos-Bolt foundation model (univariate — target history only, X ignored).",
         ),
         "random_forest": ModelExperiment(
             name="RandomForest_Reduced",
@@ -805,19 +788,6 @@ class ModelConfiguration:
             feature_groups=["all_survivors"],
             description="RandomForest via make_reduction (recursive). min_samples_leaf regularises small-N fits.",
         ),
-        "gradient_boosting": ModelExperiment(
-            name="GradientBoosting_Reduced",
-            estimator=make_reduction(
-                GradientBoostingRegressor(random_state=42), window_length=12, strategy="recursive"
-            ),
-            param_grid={
-                "window_length": [4, 8],
-                "estimator__n_estimators": [100, 200],
-                "estimator__learning_rate": [0.05, 0.1],
-            },
-            feature_groups=["all_survivors"],
-            description="GradientBoosting via make_reduction (recursive).",
-        ),
         "ridge": ModelExperiment(
             name="Ridge_Reduced",
             estimator=make_reduction(
@@ -831,73 +801,11 @@ class ModelConfiguration:
             feature_groups=["all_survivors"],
             description="Ridge in scaler pipeline via make_reduction. L2 regularization.",
         ),
-        "elasticnet": ModelExperiment(
-            name="ElasticNet_Reduced",
-            estimator=make_reduction(
-                Pipeline([
-                    ("scaler", StandardScaler()),
-                    ("regressor", ElasticNet(max_iter=10_000)),
-                ]),
-                window_length=4, strategy="recursive",
-            ),
-            param_grid={
-                "window_length": [4, 8],
-                "estimator__regressor__alpha": [0.01, 0.1, 1.0, 10.0],
-                "estimator__regressor__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9],
-            },
-            feature_groups=["all_survivors"],
-            description="ElasticNet in scaler pipeline via make_reduction. L1+L2 regularization.",
-        ),
-        "hist_gbr": ModelExperiment(
-            name="HistGBR_Reduced",
-            estimator=make_reduction(
-                HistGradientBoostingRegressor(random_state=42),
-                window_length=12, strategy="recursive",
-            ),
-            param_grid={
-                "window_length": [4, 8],
-                "estimator__max_iter": [100, 300],
-                "estimator__max_depth": [3, 5],
-                "estimator__learning_rate": [0.05, 0.1],
-                "estimator__min_samples_leaf": [10, 20],
-            },
-            feature_groups=["all_survivors"],
-            description="HistGradientBoosting via make_reduction. Non-linear. Preset-driven.",
-        ),
-        "pls": ModelExperiment(
-            name="PLS_Reduced",
-            estimator=make_reduction(
-                Pipeline([
-                    ("scaler", StandardScaler()),
-                    # scale=False because StandardScaler already handles scaling;
-                    # PLS1D fixes sklearn's 2-D predict-output quirk so this
-                    # composes correctly inside the sktime reducer.
-                    ("regressor", PLS1D(n_components=10, scale=False, max_iter=1_000)),
-                ]),
-                window_length=4, strategy="recursive",
-            ),
-            param_grid={
-                "window_length": [4, 8],
-                # n_components is the dimensionality-reduction knob: how many
-                # supervised components PLS extracts.  Cap at 20 because
-                # n_samples (~70 after lag burn-in) and the feature count
-                # bound PLS's rank — values much above 20 add noise.
-                "estimator__regressor__n_components": [2, 5, 10, 20],
-            },
-            feature_groups=["all_survivors"],
-            description=(
-                "Partial Least Squares regression in scaler pipeline. "
-                "Supervised dimensionality reduction — components chosen "
-                "to maximise covariance with y, not variance in X.  Often "
-                "outperforms Ridge in p>>n regimes."
-            ),
-        ),
-        # ── Phase 4: feature-ML challengers (deseasonalize / detrend / direct) ──
-        # Give feature-pipeline ML a fair shot at the seeded stat champions: the
-        # notebook had feature ML (MASE 2.36) losing to STL+ETS (0.93) / AutoETS
-        # (1.17); removing seasonality/trend before the reducer closes that gap.
-        # All face the SAME walk-forward MAPE gate.  Grids ≤16; `ridge` above is
-        # the undeseasonalized control.
+        # Deseasonalized multivariate feature-ML — strips quarterly seasonality
+        # from the target before the Ridge reducer (the notebook finding: this
+        # makes feature-pipeline ML competitive with the univariate stat models;
+        # it was the feature-ML arm that beat the baseline for T001081).  `ridge`
+        # above is the undeseasonalized multivariate control.
         "ridge_deseason": ModelExperiment(
             name="RidgeDeseason_Reduced",
             estimator=_deseason_ridge(),
@@ -906,67 +814,12 @@ class ModelConfiguration:
                 "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
             },
             feature_groups=["all_survivors"],
-            description="Ridge reducer on a seasonally-adjusted target (Deseasonalizer sp=4) — quarterly seasonality removed before lag-window reduction.",
+            description="Deseasonalized (sp=4) Ridge reducer on the selected features — quarterly seasonality removed before lag-window reduction.",
         ),
-        "ridge_deseason_detrend": ModelExperiment(
-            name="RidgeDeseasonDetrend_Reduced",
-            estimator=_deseason_ridge(detrend=True),
-            param_grid={
-                "forecaster__reduce__window_length": [4, 8],
-                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
-            },
-            feature_groups=["all_survivors"],
-            description="Ridge reducer on a deseasonalized + linearly-detrended target — both seasonality and trend removed before reduction.",
-        ),
-        "ridge_direct": ModelExperiment(
-            name="RidgeDirect_Reduced",
-            estimator=make_reduction(
-                Pipeline([("scaler", StandardScaler()), ("regressor", Ridge())]),
-                window_length=4, strategy="direct",
-            ),
-            param_grid={
-                "window_length": [4, 8],
-                "estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
-            },
-            feature_groups=["all_survivors"],
-            description="Ridge reducer with the DIRECT multi-step strategy (one regressor per horizon 1-4) rather than recursive. fh is required at fit time.",
-        ),
-        # Feature-group ablation arms of the deseason mechanic (the leading
-        # notebook hypothesis) — separate keys so MLflow lineage pivots cleanly
-        # by feature set.  `ridge_deseason` (all_survivors) is the base arm;
-        # re-point these to the winning mechanic if the live screen favours
-        # detrend/direct.
-        "ridge_deseason_structural": ModelExperiment(
-            name="RidgeDeseasonStructural_Reduced",
-            estimator=_deseason_ridge(),
-            param_grid={
-                "forecaster__reduce__window_length": [4, 8],
-                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
-            },
-            feature_groups=["structural_only"],
-            description="Ablation: deseason mechanic on STRUCTURAL features only (trend/regime/temporal) — isolates lag/structure signal from the CBS drivers.",
-        ),
-        "ridge_deseason_labor": ModelExperiment(
-            name="RidgeDeseasonLabor_Reduced",
-            estimator=_deseason_ridge(),
-            param_grid={
-                "forecaster__reduce__window_length": [4, 8],
-                "forecaster__reduce__estimator__regressor__alpha": [0.1, 1.0, 10.0, 100.0],
-            },
-            # labor_volume did not survive feature selection in the active
-            # catalog; labor_structure is the available labor-domain group.
-            feature_groups=["labor_structure"],
-            description="Ablation: deseason mechanic on the labor-domain feature group only (labor_structure — the available labor group in the active catalog).",
-        ),
-        # Removed: "hist_gradient_boosting" was a near-duplicate of "hist_gbr".
-        # Single source of truth.
-        #
-        # Prophet removed: unsuitable for quarterly 4Q-ahead forecasting.
-        # Reasons: (1) designed for high-frequency data (daily/weekly), not 4 obs/year;
-        # (2) 400 regressors on ~100 training rows causes extreme overfitting (R² ≈ -2300);
-        # (3) PerformanceWarning from fragmented DataFrame at 400 columns;
-        # (4) sktime Prophet adapter requires exact date-index alignment for future X
-        #     which conflicts with freq=None DatetimeIndex used throughout the pipeline.
+        # Prophet removed: unsuitable for quarterly 4Q-ahead forecasting
+        # (designed for high-frequency data; severe overfitting with many
+        # regressors on ~100 rows; needs exact date-index alignment for future
+        # X, incompatible with the freq=None DatetimeIndex used throughout).
     }
 
     @classmethod

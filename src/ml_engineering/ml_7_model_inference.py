@@ -164,6 +164,7 @@ def _forecast_from_history(
     experiment_key: str,
     champion_version: str,
     feature_catalog_hash: str = "",
+    champion_run_id: str = "",
     n_steps: int = _FH_STEPS,
 ) -> pd.DataFrame:
     """Refit ``estimator`` on full history and forecast ``n_steps`` quarters.
@@ -191,6 +192,7 @@ def _forecast_from_history(
             "horizon":              int(h + 1),
             "y_pred":               float(y_pred[h]),
             "feature_catalog_hash": feature_catalog_hash,
+            "champion_run_id":      champion_run_id,
         })
     return pd.DataFrame(rows)
 
@@ -320,6 +322,7 @@ def forecast_sector(
         experiment_key=lineage.experiment_key,
         champion_version=lineage.version,
         feature_catalog_hash=lineage.feature_catalog_hash,
+        champion_run_id=lineage.run_id,
         n_steps=n_steps,
     )
     f_log(

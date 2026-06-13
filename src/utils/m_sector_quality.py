@@ -1,26 +1,31 @@
 """
-Sector forecast-quality bucketing — Good / Medium / Poor, benchmarked against
-the BASELINE model.
+Sector forecast-quality bucketing — Good / Medium / Poor, assigned on MASE.
 
-The baseline is ``SectorQuarterRollingMean`` — the rolling 3-year same-quarter
-mean from ``01_nb_baseline_model.ipynb`` ("the model we need to outperform"),
-replicated as an estimator and evaluated through the SAME walk-forward pipeline
-as every ML model, so its MAPE is directly comparable.
+The metric set is deliberately small and interpretable:
+* **MAE** (percentage points) — the primary *stakeholder* metric: how far off,
+  on average, in the same units as the target (sick-leave %).
+* **MAPE** — the foundational percentage-error metric (relative ``|y-ŷ|/|y|``).
+* **MASE** — THE cross-sector comparison metric: the model's MAE divided by a
+  naive seasonal (m=4) forecast's MAE.  Dimensionless and fairly comparable
+  across sectors with different baseline difficulty; **MASE < 1 beats the naive**.
 
-A sector's tier reflects how much its **champion** (the registry ``@prod`` model)
-improves on the baseline's MAPE for that sector:
+A sector's tier reflects its **champion**'s MASE (the registry ``@prod`` model):
 
-    Good   — champion beats baseline by ≥ 10% relative MAPE reduction
-    Medium — champion beats baseline, but by < 10%
-    Poor   — champion does NOT beat the baseline (no demonstrable ML lift),
-             or the metrics are missing / non-finite
+    Good   — MASE ≤ 0.90      (clear skill over the seasonal naive)
+    Medium — 0.90 < MASE < 1   (beats the naive, modestly)
+    Poor   — MASE ≥ 1 or non-finite (no demonstrable lift over the naive)
+
+The baseline ``SectorQuarterRollingMean`` (rolling 3-year same-quarter mean from
+``01_nb_baseline_model.ipynb``) is evaluated through the SAME walk-forward
+pipeline as every model, so its MASE is carried as an informative reference
+column (``baseline_mase``).
 
 "Sound results" are the Good-tier sectors: those where the model provably adds
 value over the naive seasonal baseline.
 
 Sources of truth:
-* champion MAPE  → registered model ``@prod`` version tags (ADR-002)
-* baseline MAPE  → ``model_evaluations`` rows for ``SectorQuarterRollingMean_*``
+* champion MASE / MAE / MAPE → registered model ``@prod`` version tags (ADR-002)
+* baseline MASE              → ``model_evaluations`` rows for ``SectorQuarterRollingMean_*``
 """
 from __future__ import annotations
 
@@ -37,51 +42,38 @@ _PROD_ALIAS = "prod"
 _BASELINE_FAMILY = "SectorQuarterRollingMean"
 _COLUMNS = [
     "sector_code", "model_family", "model_type", "feature_groups",
-    "champion_mape", "baseline_mape", "improvement", "r2", "tier",
+    "mase", "baseline_mase", "champion_mae", "champion_mape", "r2", "tier",
 ]
 
-#: Documented default: champion must cut MAPE by ≥ 10% vs baseline to be "Good".
-GOOD_IMPROVEMENT = 0.10
+#: MASE tiers (MASE = THE metric; lower is better, <1 beats the seasonal naive):
+#:   Good   : MASE ≤ GOOD_MASE      (clear skill over the naive)
+#:   Medium : GOOD_MASE < MASE < 1  (beats the naive, modestly)
+#:   Poor   : MASE ≥ 1 or non-finite (does not beat the naive)
+GOOD_MASE = 0.90
 
-#: Float tolerance so the documented inclusive thresholds aren't missed by
-#: binary rounding (e.g. 0.054/0.060 → 0.0999…998 instead of exactly 0.10).
+#: Float tolerance so the inclusive thresholds aren't missed by binary rounding.
 _EPS = 1e-9
 
 
-def _improvement(champion_mape: Optional[float], baseline_mape: Optional[float]) -> float:
-    """Relative MAPE reduction of champion vs baseline (NaN if not computable)."""
-    if champion_mape is None or baseline_mape is None:
-        return float("nan")
-    if not math.isfinite(champion_mape) or not math.isfinite(baseline_mape) or baseline_mape <= 0:
-        return float("nan")
-    return 1.0 - (champion_mape / baseline_mape)
-
-
-def assign_tier(
-    champion_mape: Optional[float],
-    baseline_mape: Optional[float],
-    *,
-    good_improvement: float = GOOD_IMPROVEMENT,
-) -> str:
-    """Classify a sector by its champion's improvement over the baseline MAPE."""
-    improvement = _improvement(champion_mape, baseline_mape)
-    if not math.isfinite(improvement):
+def assign_tier(mase: Optional[float], *, good_mase: float = GOOD_MASE) -> str:
+    """Classify a sector champion by its MASE (lower is better; <1 beats naive)."""
+    if mase is None or not math.isfinite(mase):
         return "Poor"
-    if improvement >= good_improvement - _EPS:
+    if mase <= good_mase + _EPS:
         return "Good"
-    if improvement > _EPS:
+    if mase < 1.0 - _EPS:
         return "Medium"
     return "Poor"
 
 
-def baseline_mape_by_sector(
+def baseline_mase_by_sector(
     eval_db_path: Optional[Path] = None,
     baseline_family: str = _BASELINE_FAMILY,
 ) -> Dict[str, float]:
-    """Read each sector's baseline MAPE from the ``model_evaluations`` store.
+    """Read each sector's baseline MASE from the ``model_evaluations`` store.
 
     Baseline runs are persisted with ``model_name == f"{baseline_family}_{sector}"``.
-    Returns a ``{sector_code: mape}`` dict (most recent value per sector wins).
+    Returns a ``{sector_code: mase}`` dict (most recent value per sector wins).
     """
     from sqlalchemy import create_engine
 
@@ -90,35 +82,39 @@ def baseline_mape_by_sector(
         eval_db_path = DIR_DB_EVAL
 
     engine = create_engine(f"sqlite:///{Path(eval_db_path).as_posix()}")
-    df = pd.read_sql(
-        "SELECT model_name, mape, timestamp FROM model_evaluations", engine
-    )
+    try:
+        df = pd.read_sql("SELECT model_name, mase, timestamp FROM model_evaluations", engine)
+    except Exception:
+        return {}
+    finally:
+        engine.dispose()
     prefix = f"{baseline_family}_"
     out: Dict[str, float] = {}
     df = df[df["model_name"].astype(str).str.startswith(prefix)]
     df = df.sort_values("timestamp")  # later rows overwrite earlier per sector
     for _, row in df.iterrows():
-        if row["mape"] is None:
+        if row["mase"] is None:
             continue
-        out[str(row["model_name"])[len(prefix):]] = float(row["mape"])
+        out[str(row["model_name"])[len(prefix):]] = float(row["mase"])
     return out
 
 
 def build_sector_quality_table(
     client,
-    baseline_mapes: Dict[str, float],
+    baseline_mases: Dict[str, float],
     registered_model_prefix: str = _DEFAULT_PREFIX,
     *,
-    good_improvement: float = GOOD_IMPROVEMENT,
+    good_mase: float = GOOD_MASE,
 ) -> pd.DataFrame:
-    """Build the per-sector quality table, benchmarking champions vs baseline.
+    """Build the per-sector quality table, ranked by MASE (THE metric).
 
     Parameters
     ----------
     client : mlflow.tracking.MlflowClient
         Enumerates registered models and resolves each sector's ``@prod`` champion.
-    baseline_mapes : dict[str, float]
-        ``{sector_code: baseline_mape}`` (e.g. from ``baseline_mape_by_sector``).
+    baseline_mases : dict[str, float]
+        ``{sector_code: baseline_mase}`` (e.g. from ``baseline_mase_by_sector``) —
+        the SectorQuarterRollingMean model's MASE, shown as a reference column.
     registered_model_prefix : str
         Only registered models with this prefix are sector champions; the sector
         code is the remainder of the name.
@@ -126,9 +122,12 @@ def build_sector_quality_table(
     Returns
     -------
     pandas.DataFrame
-        Columns ``sector_code, model_family, champion_mape, baseline_mape,
-        improvement, r2, tier``; one row per sector champion, sorted by tier
-        (Good→Medium→Poor) then ascending champion MAPE.
+        Columns ``sector_code, model_family, model_type, feature_groups, mase,
+        baseline_mase, champion_mae, champion_mape, r2, tier``; one row per sector
+        champion, sorted by tier (Good→Medium→Poor) then ascending MASE.
+        ``champion_mae`` is the primary stakeholder metric (percentage points —
+        same units as the target); ``champion_mape`` the foundational
+        percentage-error metric; ``mase`` THE cross-sector comparison metric.
     """
     rows = []
     for rm in client.search_registered_models():
@@ -141,22 +140,30 @@ def build_sector_quality_table(
             continue  # no champion promoted for this sector yet
         tags = getattr(mv, "tags", None) or {}
         try:
-            champ = float(tags["mape"])
+            mase = float(tags["mase"])
             r2 = float(tags["r2"])
         except (KeyError, TypeError, ValueError):
             continue
         sector = name[len(registered_model_prefix):]
-        base = baseline_mapes.get(sector)
+        try:
+            champ_mape = float(tags.get("mape"))
+        except (TypeError, ValueError):
+            champ_mape = None
+        try:
+            champ_mae = float(tags.get("mae"))
+        except (TypeError, ValueError):
+            champ_mae = None
         rows.append({
             "sector_code": sector,
             "model_family": tags.get("model_family", ""),
             "model_type": tags.get("model_type", ""),
             "feature_groups": tags.get("feature_groups", ""),
-            "champion_mape": champ,
-            "baseline_mape": base,
-            "improvement": _improvement(champ, base),
+            "mase": mase,
+            "baseline_mase": baseline_mases.get(sector),
+            "champion_mae": champ_mae,
+            "champion_mape": champ_mape,
             "r2": r2,
-            "tier": assign_tier(champ, base, good_improvement=good_improvement),
+            "tier": assign_tier(mase, good_mase=good_mase),
         })
 
     df = pd.DataFrame(rows, columns=_COLUMNS)
@@ -165,7 +172,7 @@ def build_sector_quality_table(
     tier_order = pd.Categorical(df["tier"], categories=["Good", "Medium", "Poor"], ordered=True)
     return (
         df.assign(_t=tier_order)
-        .sort_values(["_t", "champion_mape"])
+        .sort_values(["_t", "mase"])
         .drop(columns="_t")
         .reset_index(drop=True)
     )
@@ -397,7 +404,7 @@ def refresh_sector_performance(
 
     mlflow.set_tracking_uri(f"sqlite:///{Path(eval_db_path).as_posix()}?timeout=30")
     quality = build_sector_quality_table(
-        MlflowClient(), baseline_mape_by_sector(eval_db_path),
+        MlflowClient(), baseline_mase_by_sector(eval_db_path),
         registered_model_prefix=registered_model_prefix,
     )
     enriched = enrich_with_hierarchy(quality, load_sbi_hierarchy(dimension_json_path))
@@ -413,7 +420,7 @@ def build_from_eval_db(eval_db_path: Optional[Path] = None) -> pd.DataFrame:
         from src.config import DIR_DB_EVAL
         eval_db_path = DIR_DB_EVAL
     mlflow.set_tracking_uri(f"sqlite:///{Path(eval_db_path).as_posix()}?timeout=30")
-    baselines = baseline_mape_by_sector(eval_db_path)
+    baselines = baseline_mase_by_sector(eval_db_path)
     return build_sector_quality_table(MlflowClient(), baselines)
 
 
@@ -429,8 +436,8 @@ def build_from_eval_db(eval_db_path: Optional[Path] = None) -> pd.DataFrame:
 # ───────────────────────────────────────────────────────────────────────────
 
 _EXPERIMENT_NAME = "master_SickLeave_4Q"
-#: ml_5 logs the honest outer-fold MAPE under sklearn's canonical metric name.
-_MAPE_METRIC = "metrics.mean_absolute_percentage_error"
+#: ml_5 logs MASE (THE metric) as ``mean_absolute_scaled_error`` (outer folds).
+_MASE_METRIC = "metrics.mean_absolute_scaled_error"
 
 
 def _resolve_eval_db(eval_db_path: Optional[Path]) -> Path:
@@ -466,22 +473,22 @@ def _feature_group_label(raw) -> str:
 
 
 def load_runs(eval_db_path: Optional[Path] = None) -> pd.DataFrame:
-    """Tidy every experiment run: ``model_family, feature_group, sector, mape``.
+    """Tidy every experiment run: ``model_family, feature_group, sector, mase``.
 
-    The outer-fold MAPE is the run metric ``mean_absolute_percentage_error``;
-    runs without it (none finished) are dropped.
+    The outer-fold MASE (THE metric) is the run metric
+    ``mean_absolute_scaled_error``; runs without it (none finished) are dropped.
     """
     import mlflow
 
     eval_db_path = _resolve_eval_db(eval_db_path)
     mlflow.set_tracking_uri(f"sqlite:///{eval_db_path.as_posix()}?timeout=30")
     exp = mlflow.get_experiment_by_name(_EXPERIMENT_NAME)
-    cols = ["model_family", "feature_group", "sector", "mape"]
+    cols = ["model_family", "feature_group", "sector", "mase"]
     if exp is None:
         return pd.DataFrame(columns=cols)
 
     runs = mlflow.search_runs(experiment_ids=[exp.experiment_id], max_results=5000)
-    if runs is None or runs.empty or _MAPE_METRIC not in runs.columns:
+    if runs is None or runs.empty or _MASE_METRIC not in runs.columns:
         return pd.DataFrame(columns=cols)
 
     family = runs.get("tags.model_family", runs.get("params.model_name"))
@@ -491,36 +498,36 @@ def load_runs(eval_db_path: Optional[Path] = None) -> pd.DataFrame:
         "model_family": family,
         "feature_group": fgroups.map(_feature_group_label) if fgroups is not None else "discovery",
         "sector": sector,
-        "mape": pd.to_numeric(runs[_MAPE_METRIC], errors="coerce"),
+        "mase": pd.to_numeric(runs[_MASE_METRIC], errors="coerce"),
     })
-    return out.dropna(subset=["mape", "model_family"]).reset_index(drop=True)
+    return out.dropna(subset=["mase", "model_family"]).reset_index(drop=True)
 
 
 def build_experiment_matrix(runs_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Median outer MAPE per (family, feature_group) + per-cell sector-win counts.
+    """Median outer MASE per (family, feature_group) + per-cell sector-win counts.
 
-    Returns ``(mape_matrix, win_matrix)`` — both pivoted with model families on
+    Returns ``(mase_matrix, win_matrix)`` — both pivoted with model families on
     the index and feature groups on the columns.  A "win" is awarded to the
-    (family, feature_group) cell with the lowest MAPE for each sector.
+    (family, feature_group) cell with the **lowest MASE** for each sector.
     """
     if runs_df is None or runs_df.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    mape_matrix = runs_df.pivot_table(
-        index="model_family", columns="feature_group", values="mape", aggfunc="median",
+    mase_matrix = runs_df.pivot_table(
+        index="model_family", columns="feature_group", values="mase", aggfunc="median",
     )
 
     wins: Dict[Tuple[str, str], int] = {}
     for _, grp in runs_df.groupby("sector"):
-        best = grp.loc[grp["mape"].idxmin()]
+        best = grp.loc[grp["mase"].idxmin()]
         key = (best["model_family"], best["feature_group"])
         wins[key] = wins.get(key, 0) + 1
 
-    win_matrix = pd.DataFrame(0, index=mape_matrix.index, columns=mape_matrix.columns)
+    win_matrix = pd.DataFrame(0, index=mase_matrix.index, columns=mase_matrix.columns)
     for (fam, fg), n in wins.items():
         if fam in win_matrix.index and fg in win_matrix.columns:
             win_matrix.loc[fam, fg] = n
-    return mape_matrix, win_matrix
+    return mase_matrix, win_matrix
 
 
 def per_horizon_mape(eval_db_path: Optional[Path] = None) -> pd.DataFrame:
@@ -663,6 +670,30 @@ def _fmt_pct(value) -> str:
         return "—"
 
 
+def _fmt_mase(value) -> str:
+    """Format a MASE ratio (e.g. 0.93); '—' if not computable."""
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return "—"
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_pp(value) -> str:
+    """Format a MAE in percentage points (e.g. '0.13 pp'); '—' if not computable.
+
+    The target is itself a percentage, so the MAE is already in percentage-point
+    units (no ×100) — this is the primary stakeholder reading.
+    """
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return "—"
+        return f"{float(value):.2f} pp"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def build_narrative_markdown(
     eval_db_path: Optional[Path] = None,
     gold_table: str = "master_data_ml_preprocessed",
@@ -680,7 +711,7 @@ def build_narrative_markdown(
     except Exception:
         perf = pd.DataFrame()  # read-model not refreshed yet → headline degrades
     runs = load_runs(eval_db_path)
-    mape_matrix, _win_matrix = build_experiment_matrix(runs)
+    mase_matrix, _win_matrix = build_experiment_matrix(runs)
     forecasts = load_forecasts(eval_db_path)
     horizon = per_horizon_mape(eval_db_path)
 
@@ -693,41 +724,49 @@ def build_narrative_markdown(
             "## Headline",
             f"- **{good} Good** · **{medium} Medium** · **{poor} Poor** "
             f"({len(perf)} sector champions).",
-            "- *Good* = champion cuts MAPE by ≥10% vs the `SectorQuarterRollingMean` "
-            "baseline; *Poor* = no demonstrable lift over the naive seasonal baseline.",
+            "- **Metric set** (deliberately small, for interpretability): "
+            "**MAE** (percentage points) is the primary stakeholder metric — how "
+            "far off, on average, in the same units as the target; **MAPE** is the "
+            "foundational percentage-error metric; **MASE** is THE cross-sector "
+            "comparison metric (outer-fold MAE scaled by the in-sample "
+            "seasonal-naive m=4 MAE — dimensionless, lower is better, <1 beats the "
+            "naive).",
+            f"- Sectors are ranked and tiered by **MASE**: *Good* = MASE ≤ {GOOD_MASE}; "
+            f"*Medium* = {GOOD_MASE} < MASE < 1; *Poor* = MASE ≥ 1 (does not beat the naive).",
             "",
             "## Per-sector champions",
             "",
-            "| Sector | SBI title | Champion | Model type | MAPE | Baseline | Improvement | Tier |",
-            "|---|---|---|---|---|---|---|---|",
+            "| Sector | SBI title | Champion | Model type | MAE (pp) | MAPE | MASE | Baseline MASE | Tier |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
         for _, r in perf.iterrows():
             lines.append(
                 f"| {r.get('sector_code','')} | {str(r.get('sbi_title','') or '')[:40]} "
                 f"| {r.get('model_family','')} | {r.get('model_type','') or ''} "
-                f"| {_fmt_pct(r.get('champion_mape'))} | {_fmt_pct(r.get('baseline_mape'))} "
-                f"| {_fmt_pct(r.get('improvement'))} | {r.get('tier','')} |"
+                f"| {_fmt_pp(r.get('champion_mae'))} | {_fmt_pct(r.get('champion_mape'))} "
+                f"| {_fmt_mase(r.get('mase'))} | {_fmt_mase(r.get('baseline_mase'))} "
+                f"| {r.get('tier','')} |"
             )
         lines.append("")
     else:
         lines += ["## Headline", "- No champions registered yet — run the training "
                   "sweep before reporting.", ""]
 
-    lines += ["## Model-family × feature-group matrix (median outer MAPE)", ""]
-    if mape_matrix.empty:
+    lines += ["## Model-family × feature-group matrix (median outer MASE — lower is better)", ""]
+    if mase_matrix.empty:
         lines += ["- No completed runs to compare.", ""]
     else:
-        header = "| family ＼ group | " + " | ".join(mape_matrix.columns) + " |"
-        sep = "|---|" + "|".join(["---"] * len(mape_matrix.columns)) + "|"
+        header = "| family ＼ group | " + " | ".join(mase_matrix.columns) + " |"
+        sep = "|---|" + "|".join(["---"] * len(mase_matrix.columns)) + "|"
         lines += [header, sep]
-        for fam, row in mape_matrix.iterrows():
-            cells = " | ".join(_fmt_pct(v) for v in row)
+        for fam, row in mase_matrix.iterrows():
+            cells = " | ".join(_fmt_mase(v) for v in row)
             lines.append(f"| {fam} | {cells} |")
-        best_cell = mape_matrix.stack().idxmin()
+        best_cell = mase_matrix.stack().idxmin()
         lines += [
             "",
-            f"- Lowest median MAPE: **{best_cell[0]}** on **{best_cell[1]}** "
-            f"({_fmt_pct(mape_matrix.stack().min())}).",
+            f"- Lowest median MASE: **{best_cell[0]}** on **{best_cell[1]}** "
+            f"({_fmt_mase(mase_matrix.stack().min())}).",
             "- ★ sector-win counts are annotated on the heatmap "
             "(`reports/figures/experiment_matrix.png`).",
             "",

@@ -6,8 +6,9 @@ technical reviewers and business stakeholders, sourced from the per-sector
 quality table (``m_sector_quality``), the MLflow registry, and the per-row
 walk-forward predictions in ``model_predictions``:
 
-* ``plot_sector_leaderboard`` — per-sector champion MAPE bars, coloured by
-  Good/Medium/Poor tier, with the baseline MAPE marked for reference.
+* ``plot_sector_leaderboard`` — per-sector champion MASE bars (THE metric),
+  coloured by Good/Medium/Poor tier, with the baseline MASE + the MASE=1
+  seasonal-naive line marked for reference.
 * ``plot_predicted_vs_actual`` — the champion's 4Q-ahead walk-forward
   predictions overlaid on the realised actuals for one sector.
 * ``plot_forecast`` — the champion's forward 4Q forecast (future quarters that
@@ -43,10 +44,10 @@ _TIER_COLORS = {"Good": _C_GOOD, "Medium": _C_MEDIUM, "Poor": _C_POOR}
 
 
 def leaderboard(quality_df: pd.DataFrame) -> pd.DataFrame:
-    """Rank sectors by champion MAPE (ascending = best first), adding ``rank``."""
+    """Rank sectors by champion MASE (ascending = best first), adding ``rank``."""
     if quality_df is None or quality_df.empty:
         return pd.DataFrame()
-    lb = quality_df.sort_values("champion_mape").reset_index(drop=True)
+    lb = quality_df.sort_values("mase").reset_index(drop=True)
     lb.insert(0, "rank", range(1, len(lb) + 1))
     return lb
 
@@ -54,12 +55,15 @@ def leaderboard(quality_df: pd.DataFrame) -> pd.DataFrame:
 def plot_sector_leaderboard(
     quality_df: pd.DataFrame,
     *,
-    title: str = "Sector forecast quality — champion MAPE vs baseline",
+    title: str = "Sector forecast quality — champion MASE (lower is better; <1 beats naive)",
 ) -> Figure:
-    """Horizontal bar chart of champion MAPE per sector, coloured by tier.
+    """Horizontal bar chart of champion MASE per sector, coloured by tier.
 
-    Each bar is annotated with R² and tier; a black tick marks the baseline
-    MAPE so the champion's improvement (or lack of it) is visible at a glance.
+    Bars are ranked by **MASE** (THE cross-sector comparison metric); each bar is
+    annotated with its tier and the champion's **MAE in percentage points** (the
+    primary stakeholder metric — same units as the target).  A black tick marks
+    the baseline model's MASE and a dashed line marks MASE=1 (the seasonal-naive
+    bar) so each champion's skill is visible at a glance.
     """
     lb = leaderboard(quality_df)
     fig, ax = plt.subplots(figsize=(10, max(3.0, 0.5 * len(lb) + 1.5)))
@@ -69,27 +73,29 @@ def plot_sector_leaderboard(
 
     y = list(range(len(lb)))
     colors = [_TIER_COLORS.get(t, _C_POOR) for t in lb["tier"]]
-    ax.barh(y, lb["champion_mape"] * 100.0, color=colors, zorder=2)
-    ax.scatter(
-        lb["baseline_mape"] * 100.0, y,
-        marker="|", color="black", s=240, zorder=3, label="baseline MAPE",
-    )
-    for i, row in lb.reset_index(drop=True).iterrows():
-        ax.text(
-            row["champion_mape"] * 100.0, i,
-            f"  R²={row['r2']:.2f} · {row['tier']}",
-            va="center", ha="left", fontsize=8,
+    ax.barh(y, lb["mase"], color=colors, zorder=2)
+    if "baseline_mase" in lb.columns:
+        ax.scatter(
+            lb["baseline_mase"], y,
+            marker="|", color="black", s=240, zorder=3, label="baseline MASE",
         )
+    ax.axvline(1.0, color=C_GREY, linestyle="--", linewidth=1, zorder=1, label="seasonal naive (MASE=1)")
+    has_mae = "champion_mae" in lb.columns
+    for i, row in lb.reset_index(drop=True).iterrows():
+        label = f"  {row['tier']}"
+        if has_mae and pd.notna(row.get("champion_mae")):
+            label += f" · MAE {float(row['champion_mae']):.2f}pp"
+        ax.text(row["mase"], i, label, va="center", ha="left", fontsize=8)
 
     ax.set_yticks(y)
     ax.set_yticklabels(lb["sector_code"])
     ax.invert_yaxis()
-    ax.set_xlabel("MAPE (%) — lower is better")
+    ax.set_xlabel("MASE — lower is better (<1 beats the seasonal naive)")
     ax.set_title(title)
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in _TIER_COLORS.values()]
     ax.legend(
         handles + [plt.Line2D([0], [0], color="black", marker="|", linestyle="none")],
-        list(_TIER_COLORS.keys()) + ["baseline MAPE"],
+        list(_TIER_COLORS.keys()) + ["baseline MASE"],
         loc="lower right", fontsize=8,
     )
     fig.tight_layout()
@@ -176,35 +182,35 @@ def plot_forecast(
     return fig
 
 
-def plot_matrix_heatmap(mape_matrix: pd.DataFrame, win_matrix: Optional[pd.DataFrame] = None) -> Figure:
-    """Heatmap of median outer MAPE (model family × feature group), wins annotated.
+def plot_matrix_heatmap(mase_matrix: pd.DataFrame, win_matrix: Optional[pd.DataFrame] = None) -> Figure:
+    """Heatmap of median outer MASE (model family × feature group), wins annotated.
 
     Data comes from ``m_sector_quality.build_experiment_matrix``; green = low
-    MAPE (good), red = high.  ``★N`` marks how many sectors each cell wins.
+    MASE (good, <1 beats the naive), red = high.  ``★N`` marks sector wins.
     """
-    fig, ax = plt.subplots(figsize=(max(6, 1.4 * (mape_matrix.shape[1] + 1)),
-                                     max(4, 0.6 * mape_matrix.shape[0] + 2)))
-    if mape_matrix is None or mape_matrix.empty:
+    fig, ax = plt.subplots(figsize=(max(6, 1.4 * (mase_matrix.shape[1] + 1)),
+                                     max(4, 0.6 * mase_matrix.shape[0] + 2)))
+    if mase_matrix is None or mase_matrix.empty:
         ax.text(0.5, 0.5, "No runs to compare", ha="center", va="center")
         return fig
 
-    data = mape_matrix.to_numpy(dtype=float) * 100.0
+    data = mase_matrix.to_numpy(dtype=float)
     im = ax.imshow(data, aspect="auto", cmap="RdYlGn_r")
-    ax.set_xticks(range(mape_matrix.shape[1]))
-    ax.set_xticklabels(mape_matrix.columns, rotation=30, ha="right", fontsize=8)
-    ax.set_yticks(range(mape_matrix.shape[0]))
-    ax.set_yticklabels(mape_matrix.index, fontsize=8)
-    for i in range(mape_matrix.shape[0]):
-        for j in range(mape_matrix.shape[1]):
+    ax.set_xticks(range(mase_matrix.shape[1]))
+    ax.set_xticklabels(mase_matrix.columns, rotation=30, ha="right", fontsize=8)
+    ax.set_yticks(range(mase_matrix.shape[0]))
+    ax.set_yticklabels(mase_matrix.index, fontsize=8)
+    for i in range(mase_matrix.shape[0]):
+        for j in range(mase_matrix.shape[1]):
             val = data[i, j]
             if np.isfinite(val):
                 wins = ""
                 if win_matrix is not None and not win_matrix.empty:
                     w = int(win_matrix.iloc[i, j])
                     wins = f"\n★{w}" if w else ""
-                ax.text(j, i, f"{val:.1f}%{wins}", ha="center", va="center", fontsize=7)
-    ax.set_title("Median outer MAPE — model family × feature group (★ = sector wins)")
-    fig.colorbar(im, ax=ax, label="MAPE (%)")
+                ax.text(j, i, f"{val:.2f}{wins}", ha="center", va="center", fontsize=7)
+    ax.set_title("Median outer MASE — model family × feature group (★ = sector wins; <1 beats naive)")
+    fig.colorbar(im, ax=ax, label="MASE (lower is better)")
     fig.tight_layout()
     return fig
 
@@ -299,7 +305,7 @@ def generate_all(
 
     mlflow.set_tracking_uri(f"sqlite:///{Path(eval_db_path).as_posix()}?timeout=30")
     client = MlflowClient()
-    quality = msq.build_sector_quality_table(client, msq.baseline_mape_by_sector(eval_db_path))
+    quality = msq.build_sector_quality_table(client, msq.baseline_mase_by_sector(eval_db_path))
 
     from sqlalchemy import create_engine
     engine = create_engine(f"sqlite:///{Path(eval_db_path).as_posix()}")
@@ -319,13 +325,13 @@ def generate_all(
                                  out_dir / f"predicted_vs_actual_{sector}.png"))
 
     # --- Experiment-comparison views (data aggregated by m_sector_quality) ---
-    mape_matrix, win_matrix = msq.build_experiment_matrix(msq.load_runs(eval_db_path))
-    if not mape_matrix.empty:
+    mase_matrix, win_matrix = msq.build_experiment_matrix(msq.load_runs(eval_db_path))
+    if not mase_matrix.empty:
         csv_path = out_dir.parent / "experiment_matrix.csv"
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-        mape_matrix.to_csv(csv_path)
+        mase_matrix.to_csv(csv_path)
         saved.append(csv_path)
-    saved.append(save_figure(plot_matrix_heatmap(mape_matrix, win_matrix),
+    saved.append(save_figure(plot_matrix_heatmap(mase_matrix, win_matrix),
                              out_dir / "experiment_matrix.png"))
     saved.append(save_figure(plot_horizon_curve(msq.per_horizon_mape(eval_db_path)),
                              out_dir / "horizon_mape.png"))

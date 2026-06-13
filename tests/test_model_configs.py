@@ -10,6 +10,7 @@ compatible estimator (clone, pickle, nested param routing for grid search).
 import pickle
 import unittest
 import warnings
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -21,6 +22,7 @@ from sktime.performance_metrics.forecasting import MeanSquaredError
 
 from src.ml_engineering.model_configs import (
     Base,
+    ChronosForecaster,
     ModelConfiguration,
     ModelForecastRecord,
     QuarterlyPeriodForecaster,
@@ -113,44 +115,27 @@ class TestStatCatalogEntries(unittest.TestCase):
         self.assertNotIn("mutated", fresh.param_grid[0]["error"])
 
 
-class TestPhase4Challengers(unittest.TestCase):
-    """Deseasonalize/detrend + direct-strategy feature-ML challengers.
+class TestDeseasonChallenger(unittest.TestCase):
+    """The deseasonalized multivariate feature-ML model (``ridge_deseason``).
 
-    Each new catalog key must retrieve with a bounded grid, and the wrapped
-    estimators must fit/predict/clone/pickle on the pipeline's freq=None
-    quarterly index and tune through ForecastingGridSearchCV (with fh at fit —
-    mandatory for the direct-strategy reducer).
+    Must retrieve with a bounded grid and fit/predict/clone/pickle on the
+    pipeline's freq=None quarterly index, and tune through ForecastingGridSearchCV.
     """
-
-    NEW_KEYS = {
-        "ridge_deseason":            ("RidgeDeseason_Reduced", ["all_survivors"]),
-        "ridge_deseason_detrend":    ("RidgeDeseasonDetrend_Reduced", ["all_survivors"]),
-        "ridge_direct":              ("RidgeDirect_Reduced", ["all_survivors"]),
-        "ridge_deseason_structural": ("RidgeDeseasonStructural_Reduced", ["structural_only"]),
-        "ridge_deseason_labor":      ("RidgeDeseasonLabor_Reduced", ["labor_structure"]),
-    }
 
     def setUp(self):
         warnings.filterwarnings("ignore")
         self.y, self.X = _quarterly_series(48)
         self.fh = ForecastingHorizon([1, 2, 3, 4], is_relative=True)
 
-    @staticmethod
-    def _combos(grid):
-        if isinstance(grid, list):
-            return sum(int(np.prod([len(v) for v in b.values()])) for b in grid)
-        return int(np.prod([len(v) for v in grid.values()]))
-
-    def test_catalog_retrieval_for_each_new_key(self):
-        for key, (name, groups) in self.NEW_KEYS.items():
-            config = ModelConfiguration.get(key)
-            self.assertEqual(config.name, name, key)
-            self.assertEqual(config.feature_groups, groups, key)
-            self.assertLessEqual(self._combos(config.param_grid), 16, key)
-
-    def test_deseason_wrapper_fit_predict_clone_pickle(self):
+    def test_catalog_entry(self):
         config = ModelConfiguration.get("ridge_deseason")
-        est = config.estimator
+        self.assertEqual(config.name, "RidgeDeseason_Reduced")
+        self.assertEqual(config.feature_groups, ["all_survivors"])
+        combos = int(np.prod([len(v) for v in config.param_grid.values()]))
+        self.assertLessEqual(combos, 16)
+
+    def test_wrapper_fit_predict_clone_pickle(self):
+        est = ModelConfiguration.get("ridge_deseason").estimator
         self.assertIsInstance(est, QuarterlyPeriodForecaster)
 
         est.fit(y=self.y, X=self.X, fh=self.fh)
@@ -167,33 +152,80 @@ class TestPhase4Challengers(unittest.TestCase):
         restored = pickle.loads(pickle.dumps(est))
         self.assertEqual(len(restored.predict(fh=self.fh, X=self.X.iloc[:4])), 4)
 
-    def test_detrend_wrapper_fit_predict(self):
-        est = ModelConfiguration.get("ridge_deseason_detrend").estimator
-        est.fit(y=self.y, X=self.X, fh=self.fh)
-        self.assertEqual(len(est.predict(fh=self.fh, X=self.X.iloc[:4])), 4)
-
-    def test_direct_strategy_requires_and_accepts_fh(self):
-        """ridge_direct uses strategy='direct' → fh is mandatory at fit time."""
-        est = ModelConfiguration.get("ridge_direct").estimator
-        self.assertTrue(est.get_tag("requires-fh-in-fit"))
-        with self.assertRaises(ValueError):
-            est.fit(y=self.y, X=self.X)  # no fh → sktime rejects direct fit
-        est = ModelConfiguration.get("ridge_direct").estimator
-        est.fit(y=self.y, X=self.X, fh=self.fh)
-        self.assertEqual(len(est.predict(fh=self.fh, X=self.X.iloc[:4])), 4)
-
-    def test_param_grid_survives_grid_search_with_fh(self):
-        """The recursive-deseason and direct grids both tune through
-        ForecastingGridSearchCV when fh is supplied at fit (mirrors ml_4)."""
+    def test_param_grid_survives_grid_search(self):
         cv = ExpandingWindowSplitter(initial_window=40, step_length=4, fh=[1, 2, 3, 4])
-        for key in ("ridge_deseason", "ridge_direct"):
-            config = ModelConfiguration.get(key)
-            grid = ForecastingGridSearchCV(
-                forecaster=config.estimator, param_grid=config.param_grid, cv=cv,
-                scoring=MeanSquaredError(square_root=False),
-            )
-            grid.fit(y=self.y, X=self.X, fh=self.fh)
-            self.assertEqual(len(grid.predict(fh=self.fh, X=self.X.iloc[:4])), 4, key)
+        config = ModelConfiguration.get("ridge_deseason")
+        grid = ForecastingGridSearchCV(
+            forecaster=config.estimator, param_grid=config.param_grid, cv=cv,
+            scoring=MeanSquaredError(square_root=False),
+        )
+        grid.fit(y=self.y, X=self.X, fh=self.fh)
+        self.assertEqual(len(grid.predict(fh=self.fh, X=self.X.iloc[:4])), 4)
+
+
+class _FakeChronosPipeline:
+    """Stand-in for BaseChronosPipeline — 'forecasts' the last value repeated,
+    so the wrapper can be tested without downloading model weights."""
+
+    def predict_quantiles(self, inputs, prediction_length, quantile_levels):
+        import torch
+        last = float(inputs[-1])
+        q = torch.full((1, prediction_length, len(quantile_levels)), last)
+        return q, q[:, :, 0]
+
+
+class TestChronosForecaster(unittest.TestCase):
+    """Zero-shot Chronos-Bolt wrapper — catalog entry + fit/predict (mocked
+    pipeline, no weight download) + clone/pickle without the heavy model."""
+
+    def setUp(self):
+        warnings.filterwarnings("ignore")
+        self.y, self.X = _quarterly_series(40)
+        self.fh = ForecastingHorizon([1, 2, 3, 4], is_relative=True)
+
+    def test_catalog_entry(self):
+        c = ModelConfiguration.get("chronos_bolt")
+        self.assertEqual(c.name, "ChronosBolt_Stat")
+        self.assertEqual(c.feature_groups, ["structural_only"])
+        self.assertEqual(c.param_grid, {})  # zero-shot — nothing to tune
+        self.assertIsInstance(c.estimator, ChronosForecaster)
+        self.assertEqual(c.estimator.model_id, "amazon/chronos-bolt-base")
+
+    def test_params_clone_pickle_without_weights(self):
+        est = ChronosForecaster(model_id="amazon/chronos-bolt-base", device="cpu")
+        self.assertEqual(est.get_params()["model_id"], "amazon/chronos-bolt-base")
+        clone(est)                       # sklearn-cloneable (params only)
+        pickle.loads(pickle.dumps(est))  # picklable without the multi-hundred-MB model
+
+    @patch("src.ml_engineering.model_configs._load_chronos")
+    def test_fit_predict_median_and_ignores_X(self, mock_load):
+        mock_load.return_value = _FakeChronosPipeline()
+        est = ChronosForecaster()
+        est.fit(y=self.y, X=self.X, fh=self.fh)      # zero-shot: just stores context
+        pred = est.predict(fh=self.fh, X=self.X.iloc[:4])
+
+        self.assertEqual(len(pred), 4)
+        # fake returns the last observed value as the median for every step
+        self.assertTrue(np.allclose(pred.to_numpy(), float(self.y.iloc[-1]), atol=1e-3))
+        expected = pd.DatetimeIndex(["2022-03-31", "2022-06-30", "2022-09-30", "2022-12-31"])
+        self.assertTrue((pd.DatetimeIndex(pred.index) == expected).all())
+        self.assertTrue(est.get_tag("ignores-exogeneous-X"))
+        mock_load.assert_called()  # pipeline loaded lazily at predict (not import)
+
+
+class TestCuratedCatalog(unittest.TestCase):
+    """The catalog is the curated comparison set (no clutter)."""
+
+    def test_exactly_the_curated_keys(self):
+        self.assertEqual(
+            set(ModelConfiguration._CATALOG),
+            {"baseline", "autoets", "stl_ets", "chronos_bolt",
+             "ridge", "random_forest", "ridge_deseason"},
+        )
+
+    def test_multivariate_models_use_selected_features(self):
+        for key in ("ridge", "random_forest", "ridge_deseason"):
+            self.assertEqual(ModelConfiguration.get(key).feature_groups, ["all_survivors"])
 
 
 class TestModelForecastRecord(unittest.TestCase):

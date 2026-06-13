@@ -105,7 +105,8 @@ class TestForecastFromHistory(unittest.TestCase):
             x, y,
             sector_code="T001081", model_family="SectorQuarterRollingMean",
             model_type="SectorQuarterRollingMean", experiment_key="baseline",
-            champion_version="1", feature_catalog_hash="deadbeef1234", n_steps=4,
+            champion_version="1", feature_catalog_hash="deadbeef1234",
+            champion_run_id="run_abc", n_steps=4,
         )
         self.assertEqual(len(frame), 4)
         self.assertEqual(list(frame["horizon"]), [1, 2, 3, 4])
@@ -115,8 +116,9 @@ class TestForecastFromHistory(unittest.TestCase):
         self.assertTrue((pd.DatetimeIndex(frame["target_date"]) == expected_dates).all())
         self.assertTrue(np.isfinite(frame["y_pred"]).all())
         self.assertTrue((frame["sector_code"] == "T001081").all())
-        # Reproducibility column carried through to every forecast row.
+        # Reproducibility + provenance columns carried through to every row.
         self.assertTrue((frame["feature_catalog_hash"] == "deadbeef1234").all())
+        self.assertTrue((frame["champion_run_id"] == "run_abc").all())
 
     def test_sktime_univariate_branch(self):
         x, y = _quarterly_history()

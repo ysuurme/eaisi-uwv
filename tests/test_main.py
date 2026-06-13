@@ -8,12 +8,12 @@ class TestMain(unittest.TestCase):
     def test_main_calls_pipeline(self, mock_ui, mock_run):
         """Verify main.py wires CLI args into run_pipeline correctly."""
         import sys
-        with patch.object(sys, "argv", ["main.py", "test_gold", "linear"]):
+        with patch.object(sys, "argv", ["main.py", "test_gold", "ridge"]):
             from main import main
             main()
 
         mock_run.assert_called_once_with(
-            experiment_key="linear",
+            experiment_key="ridge",
             gold_table="test_gold",
             sbi_filter_col=None,
             feature_groups=None,
@@ -29,7 +29,7 @@ class TestMain(unittest.TestCase):
             main()
 
         mock_run.assert_called_once_with(
-            experiment_key="linear",
+            experiment_key="baseline",
             gold_table="master_data_ml_preprocessed",
             sbi_filter_col=None,
             feature_groups=None,
@@ -61,13 +61,13 @@ class TestMain(unittest.TestCase):
         import sys
         with patch.object(
             sys, "argv",
-            ["main.py", "my_table", "linear", "-", "temporal,labor_market"],
+            ["main.py", "my_table", "ridge", "-", "temporal,labor_market"],
         ):
             from main import main
             main()
 
         mock_run.assert_called_once_with(
-            experiment_key="linear",
+            experiment_key="ridge",
             gold_table="my_table",
             sbi_filter_col=None,
             feature_groups=["temporal", "labor_market"],
@@ -132,13 +132,13 @@ class TestMain(unittest.TestCase):
         import sys
         with patch.object(
             sys, "argv",
-            ["main.py", "my_table", "linear", "BedrijfskenmerkenSBI2008_301000", "temporal,labor_market"],
+            ["main.py", "my_table", "ridge", "BedrijfskenmerkenSBI2008_301000", "temporal,labor_market"],
         ):
             from main import main
             main()
 
         mock_run.assert_called_once_with(
-            experiment_key="linear",
+            experiment_key="ridge",
             gold_table="my_table",
             sbi_filter_col="BedrijfskenmerkenSBI2008_301000",
             feature_groups=["temporal", "labor_market"],

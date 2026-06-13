@@ -16,6 +16,7 @@ from src.ml_engineering.model_configs import SectorQuarterRollingMean
 from src.ml_engineering.ml_5_model_evaluation import (
     QUARTER_DAYS,
     ModelEvaluator,
+    _build_eval_tables,
     build_future_x,
 )
 
@@ -321,6 +322,78 @@ class TestBuildFutureX(unittest.TestCase):
     def test_empty_history_raises(self):
         with self.assertRaises(ValueError):
             build_future_x(pd.DataFrame(), n_steps=4)
+
+
+# ---------------------------------------------------------------------------
+# MLflow evaluation table artifacts (mlflow.log_table) — consolidated eval data
+# ---------------------------------------------------------------------------
+
+def _pred_records():
+    return [
+        {"origin_date": pd.Timestamp("2021-09-30"), "target_date": pd.Timestamp("2021-12-31"),
+         "horizon": 1, "y_true": 5.0, "y_pred": 4.5, "fold_set": "outer"},
+        {"origin_date": pd.Timestamp("2021-09-30"), "target_date": pd.Timestamp("2022-03-31"),
+         "horizon": 2, "y_true": 5.0, "y_pred": 6.0, "fold_set": "outer"},
+        {"origin_date": pd.Timestamp("2020-09-30"), "target_date": pd.Timestamp("2020-12-31"),
+         "horizon": 1, "y_true": 4.0, "y_pred": 4.0, "fold_set": "inner"},
+    ]
+
+
+class TestBuildEvalTables(unittest.TestCase):
+
+    def test_predictions_table_has_errors_and_serializable_dates(self):
+        # args: (records, mase, mape, r2, mae, rmse, mae_inner)
+        preds, _ = _build_eval_tables(_pred_records(), 0.9, 0.1, 0.5, 0.4, 0.5, 0.6)
+        self.assertEqual(len(preds), 3)
+        self.assertIn("abs_error", preds.columns)
+        self.assertIn("abs_pct_error", preds.columns)
+        # dates coerced to str so the JSON table artifact serializes cleanly
+        self.assertTrue(all(isinstance(d, str) for d in preds["origin_date"]))
+        self.assertEqual(sorted(preds["abs_error"].round(3).tolist()), [0.0, 0.5, 1.0])
+
+    def test_metrics_table_headline_inner_and_per_horizon(self):
+        # args: (records, mase, mape, r2, mae, rmse, mae_inner)
+        _, metrics = _build_eval_tables(_pred_records(), 0.9, 0.1, 0.5, 0.4, 0.5, 0.6)
+        m = {(r.scope, r.metric): r.value for r in metrics.itertuples()}
+        self.assertEqual(m[("outer", "MASE")], 0.9)  # THE metric leads the table
+        self.assertEqual(m[("outer", "MAPE")], 0.1)
+        self.assertEqual(m[("outer", "R2")], 0.5)
+        self.assertEqual(m[("inner", "MAE")], 0.6)
+        # per-horizon outer MAPE: h1 = |5-4.5|/5 = 0.10 ; h2 = |5-6|/5 = 0.20
+        self.assertAlmostEqual(m[("outer_h1", "MAPE")], 0.10)
+        self.assertAlmostEqual(m[("outer_h2", "MAPE")], 0.20)
+
+    def test_empty_records_still_returns_headline_metrics(self):
+        nan = float("nan")
+        preds, metrics = _build_eval_tables([], nan, nan, nan, nan, nan, nan)
+        self.assertTrue(preds.empty)
+        self.assertEqual(len(metrics), 6)  # 5 outer headline (incl. MASE) + 1 inner
+
+
+class TestEvalTablesLogged(unittest.TestCase):
+
+    @patch("src.ml_engineering.ml_5_model_evaluation.mlflow")
+    def test_evaluate_logs_eval_table_artifacts(self, mock_mlflow):
+        """evaluate() must log the predictions + metrics tables via mlflow.log_table
+        so the run's Evaluation tab is populated."""
+        mock_mlflow.start_run.return_value.__enter__.return_value = MagicMock()
+        x_train, y_train = _make_series(32)
+        x_test, y_test = _make_series(8, start="2023-01-01")
+        baseline = SectorQuarterRollingMean()
+        baseline.fit(x_train, y_train)
+
+        ModelEvaluator(session=MagicMock()).evaluate(
+            run_id="run_x", fitted_model=baseline,
+            x_train=x_train, y_train=y_train, x_test=x_test, y_test=y_test,
+            model_name="test_baseline", n_test_points=8,
+        )
+
+        paths = [
+            (c.kwargs.get("artifact_file") or (c.args[1] if len(c.args) > 1 else None))
+            for c in mock_mlflow.log_table.call_args_list
+        ]
+        self.assertIn("eval/walk_forward_predictions.json", paths)
+        self.assertIn("eval/metrics_summary.json", paths)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import mlflow
 import mlflow.sklearn
+import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -106,11 +107,12 @@ def run_pipeline(
     sbi_filter_col: Optional[str] = None,
     n_test_points: int = 20,
     r2_floor: Optional[float] = None,
+    max_mase: Optional[float] = None,
 ) -> None:
     """MLOps Level 0: Manual ML Pipeline.
 
     Args:
-        experiment_key: Key in ModelConfiguration catalog (e.g. "linear", "random_forest").
+        experiment_key: Key in ModelConfiguration catalog (e.g. "baseline", "ridge", "random_forest").
         gold_table: Name of the preprocessed table in the gold feature store.
         feature_groups: Named feature groups from FEATURE_CATALOG. None = all columns.
         sbi_filter_col: OHE column for sector-specific mode, e.g.
@@ -232,6 +234,7 @@ def run_pipeline(
                 ),
                 sector_code=sector_label,
                 r2_floor=r2_floor,
+                max_mase=max_mase,
                 tags={"data_source": gold_table, "sector": sector_label, "status": "candidate"},
                 description=f"{config.name} | sector={sector_label} | 4Q ahead.",
                 session=session,
@@ -254,6 +257,7 @@ def run_sector_sweep(
     feature_groups: Optional[List[str]] = None,
     n_test_points: int = 20,
     r2_floor: Optional[float] = None,
+    max_mase: Optional[float] = None,
 ) -> None:
     """Runs the pipeline for every OHE SBI sector column found in the gold table.
 
@@ -294,6 +298,7 @@ def run_sector_sweep(
                 feature_groups=feature_groups,
                 n_test_points=n_test_points,
                 r2_floor=r2_floor,
+                max_mase=max_mase,
             )
         except Exception as exc:
             # Log and continue — one bad sector should not abort the sweep
@@ -323,6 +328,9 @@ def run_forecast(
     * persists the tidy forecast frame with delete-then-insert **per
       ``sector_code``** (re-running for a subset of sectors replaces only those
       sectors' rows), mirroring the ``sector_performance`` refresh semantics;
+    * logs each sector's forecast as an MLflow table artifact on its champion's
+      run (``eval/forward_forecast.json``), so the forward forecast shows up in
+      the run's Evaluation tab next to the backtest tables;
     * renders one best-effort ``reports/figures/forecast_<sector>.png`` overlay
       per sector (a failing sector is logged and skipped, never fatal).
 
@@ -340,9 +348,9 @@ def run_forecast(
         f"sqlite:///{DIR_DB_EVAL.as_posix()}", connect_args={"timeout": 30}
     )
     _ensure_eval_db(engine)
+    client = MlflowClient()
 
     try:
-        client = MlflowClient()
         forecasts = ml_7.forecast_all_champions(
             client, gold_table=gold_table, n_steps=n_steps,
         )
@@ -358,9 +366,14 @@ def run_forecast(
     finally:
         engine.dispose()  # release the SQLite file handle (Windows-safe)
 
+    # MLflow table artifacts on each champion's run (after the engine is closed,
+    # so we don't hold two connections to the eval-store SQLite at once).
+    n_logged = _log_forecast_tables(client, forecasts)
+
     f_log(
         f"Forecast stored | {n_written} rows across "
-        f"{forecasts['sector_code'].nunique()} sectors → model_forecasts",
+        f"{forecasts['sector_code'].nunique()} sectors → model_forecasts "
+        f"| {n_logged} champion run(s) got a forward_forecast table",
         c_type="store",
     )
 
@@ -403,6 +416,38 @@ def _persist_forecasts(engine, forecasts) -> int:
             ))
         session.commit()
     return len(records)
+
+
+def _log_forecast_tables(client, forecasts) -> int:
+    """Log each sector's forward forecast as an MLflow table on its champion's run.
+
+    Writes ``eval/forward_forecast.json`` to the run that produced the sector's
+    ``@prod`` champion, so the forecast shows in that run's Evaluation tab beside
+    the backtest tables.  ``mlflow.log_table`` APPENDS, so this is made idempotent
+    by skipping a run that already carries the artifact — the forecast is
+    deterministic per champion run, and the eval-DB ``model_forecasts`` table is
+    the always-refreshed source of truth.  Best-effort per run (never fatal).
+    Returns the number of champion runs that received a fresh table.
+    """
+    if forecasts is None or forecasts.empty or "champion_run_id" not in forecasts.columns:
+        return 0
+    logged = 0
+    for run_id, grp in forecasts.groupby("champion_run_id"):
+        if not run_id:
+            continue
+        try:
+            existing = {a.path for a in client.list_artifacts(run_id, "eval")}
+            if "eval/forward_forecast.json" in existing:
+                continue  # deterministic per champion run → don't append a duplicate
+            tbl = grp.drop(columns=["champion_run_id"]).copy()
+            tbl["origin_date"] = tbl["origin_date"].astype(str)
+            tbl["target_date"] = tbl["target_date"].astype(str)
+            with mlflow.start_run(run_id=run_id):
+                mlflow.log_table(tbl, artifact_file="eval/forward_forecast.json")
+            logged += 1
+        except Exception as exc:
+            f_log(f"Forecast table log skipped for run {run_id[:8]}: {exc}", c_type="warning")
+    return logged
 
 
 def _render_forecast_figures(forecasts, gold_table: str) -> None:
@@ -499,14 +544,30 @@ _YEARLY_PREFIX = "y_"
 #: Synthetic sector column added by DataExtractor.load_full_panel().
 _SECTOR_COL = "sector"
 
+#: Quarter-end date column in the gold panel.
+_DATE_COL = "period_enddate"
+
+#: Default feature-selection holdout — the last N quarters are dropped before the
+#: funnel so target-dependent filters never see the walk-forward evaluation
+#: window.  Matches ml_3/ml_5's evaluation window (n_test_points=20 = 5 origins × 4Q).
+_FS_HOLDOUT_QUARTERS = 20
+
 
 def run_feature_selection(
     gold_table: str = "master_data_ml_preprocessed",
     funnel_params: Optional[Dict[str, Dict[str, Any]]] = None,
+    holdout_last_n_quarters: int = _FS_HOLDOUT_QUARTERS,
 ) -> Path:
     """Derives the canonical feature catalog from the gold feature store.
 
     Flow (mirrors the numbered pipeline structure):
+        Step 0 (leakage guard) — drop the last ``holdout_last_n_quarters``
+            quarters from the panel BEFORE any target-dependent filtering, so the
+            funnel (correlation / Granger / LASSO, all of which use the target)
+            never sees the walk-forward evaluation window.  The panel is balanced
+            (every sector shares the same quarterly calendar), so one global
+            cutoff matches the per-sector test split in ml_3.  Pass ``0`` to
+            disable (e.g. to regenerate a catalog over all history for diagnostics).
         Step 1 (DataExtractor) — load the full panel and derive candidate
             feature columns from the gold table (``derive_feature_columns`` is
             the single source of truth for what counts as a feature column);
@@ -531,8 +592,19 @@ def run_feature_selection(
     """
     f_log("Feature Selection | registry-driven statistical funnel", c_type="start")
 
-    # --- Step 1: full panel + candidate columns (DataExtractor logic) ---
+    # --- Step 0: leakage guard — hold out the evaluation window ---
     df = DataExtractor.load_full_panel(DIR_DB_GOLD, gold_table)
+    df, holdout_info = _apply_feature_selection_holdout(df, holdout_last_n_quarters)
+    if holdout_info["held_out_quarters"]:
+        f_log(
+            f"Holdout | dropped last {holdout_info['held_out_quarters']} quarters "
+            f"(cutoff {holdout_info['cutoff_date']}) before selection: "
+            f"{holdout_info['rows_before']} → {holdout_info['rows_after']} rows "
+            f"— funnel cannot see the evaluation window (no leakage)",
+            c_type="process",
+        )
+
+    # --- Step 1: candidate columns (DataExtractor logic) ---
     all_features = DataExtractor.derive_feature_columns(df, ML_TARGET_COLUMN)
 
     # --- Registry filter: frequency-eligible origins only ---
@@ -589,6 +661,7 @@ def run_feature_selection(
             "gold_table": gold_table,
             "target": ML_TARGET_COLUMN,
             "frequencies_included": list(FEATURE_SELECTION_FREQUENCIES),
+            "feature_selection_holdout": holdout_info,
             "candidate_pool": {
                 "n_candidates": len(candidates),
                 "allowed_tables": sorted(allowed_tables),
@@ -607,6 +680,39 @@ def run_feature_selection(
         c_type="complete",
     )
     return path
+
+
+def _apply_feature_selection_holdout(df, n_quarters: int) -> tuple:
+    """Drop the last ``n_quarters`` unique quarters from the panel (leakage guard).
+
+    Feature selection is target-dependent, so it must not see the quarters that
+    later form the walk-forward evaluation window.  The gold panel is balanced
+    (all sectors share one quarterly calendar), so a single global cutoff aligns
+    with the per-sector test split that ml_3 applies at training time.
+
+    Returns ``(train_df, holdout_info)``.  ``n_quarters <= 0`` disables the guard
+    (returns the panel unchanged) — used only for all-history diagnostic catalogs.
+    """
+    if n_quarters <= 0:
+        return df, {"held_out_quarters": 0, "cutoff_date": None,
+                    "rows_before": int(len(df)), "rows_after": int(len(df))}
+
+    dates = pd.to_datetime(df[_DATE_COL])
+    unique_dates = sorted(dates.unique())
+    if len(unique_dates) <= n_quarters:
+        raise RuntimeError(
+            f"Feature-selection holdout ({n_quarters}q) ≥ available quarters "
+            f"({len(unique_dates)}). Reduce holdout_last_n_quarters."
+        )
+    cutoff = unique_dates[-n_quarters]
+    train_df = df[dates.to_numpy() < cutoff].copy()
+    info = {
+        "held_out_quarters": int(n_quarters),
+        "cutoff_date": str(pd.Timestamp(cutoff).date()),
+        "rows_before": int(len(df)),
+        "rows_after": int(len(train_df)),
+    }
+    return train_df, info
 
 
 def _load_column_origin() -> Dict[str, str]:
@@ -734,7 +840,7 @@ if __name__ == "__main__":
     setup_logging()
 
     # All-industry mode (default):
-    run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed")
+    run_pipeline(experiment_key="ridge", gold_table="master_data_ml_preprocessed")
     # Sector-specific mode (example):
-    # run_pipeline(experiment_key="linear", gold_table="master_data_ml_preprocessed",
+    # run_pipeline(experiment_key="ridge", gold_table="master_data_ml_preprocessed",
     #              sbi_filter_col="BedrijfskenmerkenSBI2008_301000")

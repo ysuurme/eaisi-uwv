@@ -12,8 +12,10 @@ from sqlalchemy.orm import sessionmaker
 
 from src.config import ML_TARGET_COLUMN
 from src.ml_engineering.ml_orchestrator import (
+    _apply_feature_selection_holdout,
     _ensure_eval_db,
     _group_by_registry_category,
+    _log_forecast_tables,
     _partition_candidates,
     _persist_forecasts,
     run_feature_selection,
@@ -50,7 +52,7 @@ class TestPipeline(unittest.TestCase):
         mock_model_validator_cls.return_value.validate_and_register.return_value = True
         mock_mlflow.get_experiment_by_name.return_value = MagicMock()
 
-        run_pipeline(experiment_key="linear", gold_table="test_table")
+        run_pipeline(experiment_key="ridge", gold_table="test_table")
 
         mock_trainer_cls.return_value.train.assert_called_once()
         mock_evaluator_cls.return_value.evaluate.assert_called_once()
@@ -121,7 +123,7 @@ class TestPipeline(unittest.TestCase):
         mock_model_validator_cls.return_value.validate_and_register.return_value = False
         mock_mlflow.get_experiment_by_name.return_value = MagicMock()
 
-        run_pipeline(experiment_key="linear", gold_table="test_table")
+        run_pipeline(experiment_key="ridge", gold_table="test_table")
 
         mock_model_validator_cls.return_value.validate_and_register.assert_called_once()
 
@@ -227,13 +229,19 @@ class TestRunFeatureSelection(unittest.TestCase):
             ), patch(
                 "src.ml_engineering.ml_orchestrator.reload_feature_catalog"
             ) as mock_reload:
+                # holdout=0 here so the funnel plumbing is tested on all 28
+                # synthetic quarters (the holdout itself is tested separately).
                 path = run_feature_selection(
-                    gold_table="test_gold", funnel_params=_PERMISSIVE_FUNNEL
+                    gold_table="test_gold", funnel_params=_PERMISSIVE_FUNNEL,
+                    holdout_last_n_quarters=0,
                 )
 
             self.assertEqual(path.name, "feature_catalog.json")
             with open(path) as fh:
                 artifact = json.load(fh)
+
+            # Holdout lineage is recorded in the catalog metadata.
+            self.assertEqual(artifact["feature_selection_holdout"]["held_out_quarters"], 0)
 
             survivors = set(artifact["surviving_features"])
             self.assertTrue(survivors)  # funnel must not eliminate everything
@@ -278,6 +286,41 @@ class TestRunFeatureSelection(unittest.TestCase):
                     run_feature_selection(gold_table="test_gold")
 
 
+class TestFeatureSelectionHoldout(unittest.TestCase):
+    """Leakage guard: the funnel must not see the last N quarters."""
+
+    @staticmethod
+    def _panel(n_quarters=28, sectors=("S1", "S2")):
+        dates = pd.date_range("2016-03-31", periods=n_quarters, freq="QE")
+        return pd.concat(
+            [pd.DataFrame({"period_enddate": dates, "sector": s,
+                           "v": range(n_quarters)}) for s in sectors],
+            ignore_index=True,
+        )
+
+    def test_drops_last_n_unique_quarters(self):
+        panel = self._panel(n_quarters=28, sectors=("S1", "S2"))
+        train, info = _apply_feature_selection_holdout(panel, 20)
+
+        self.assertEqual(info["held_out_quarters"], 20)
+        self.assertEqual(train["period_enddate"].nunique(), 8)   # 28 - 20
+        self.assertEqual(info["rows_after"], 16)                 # 8 quarters × 2 sectors
+        # every surviving row is strictly before the (first held-out) cutoff
+        cutoff = pd.Timestamp(info["cutoff_date"])
+        self.assertTrue((pd.to_datetime(train["period_enddate"]) < cutoff).all())
+
+    def test_zero_disables_guard(self):
+        panel = self._panel(n_quarters=12)
+        train, info = _apply_feature_selection_holdout(panel, 0)
+        self.assertEqual(info["held_out_quarters"], 0)
+        self.assertEqual(len(train), len(panel))
+
+    def test_raises_when_holdout_not_smaller_than_history(self):
+        panel = self._panel(n_quarters=10)
+        with self.assertRaises(RuntimeError):
+            _apply_feature_selection_holdout(panel, 10)
+
+
 # ---------------------------------------------------------------------------
 # Forecast production (run_forecast + _persist_forecasts) — Step 7 wiring
 # ---------------------------------------------------------------------------
@@ -298,6 +341,7 @@ def _forecast_frame(sector: str, y_preds, hash_: str = "abc12345") -> pd.DataFra
         "horizon": list(range(1, n + 1)),
         "y_pred": list(y_preds),
         "feature_catalog_hash": [hash_] * n,
+        "champion_run_id": [f"run_{sector}"] * n,
     })
 
 
@@ -350,6 +394,7 @@ class TestPersistForecasts(unittest.TestCase):
 class TestRunForecastWiring(unittest.TestCase):
     """Orchestrator wiring with a mocked registry/eval-DB boundary."""
 
+    @patch("src.ml_engineering.ml_orchestrator._log_forecast_tables", return_value=2)
     @patch("src.ml_engineering.ml_orchestrator._render_forecast_figures")
     @patch("src.ml_engineering.ml_orchestrator._persist_forecasts", return_value=8)
     @patch("src.ml_engineering.ml_7_model_inference.forecast_all_champions")
@@ -357,9 +402,9 @@ class TestRunForecastWiring(unittest.TestCase):
     @patch("src.ml_engineering.ml_orchestrator._ensure_eval_db")
     @patch("src.ml_engineering.ml_orchestrator.create_engine")
     @patch("src.ml_engineering.ml_orchestrator._configure_mlflow")
-    def test_persists_and_renders_when_champions_exist(
+    def test_persists_logs_tables_and_renders_when_champions_exist(
         self, mock_cfg, mock_engine, mock_ensure, mock_client_cls,
-        mock_forecast_all, mock_persist, mock_render,
+        mock_forecast_all, mock_persist, mock_render, mock_log_tables,
     ):
         frame = pd.concat(
             [_forecast_frame("T001081", [1, 2, 3, 4]),
@@ -373,8 +418,10 @@ class TestRunForecastWiring(unittest.TestCase):
         self.assertEqual(n, 8)
         mock_forecast_all.assert_called_once()
         mock_persist.assert_called_once()
+        mock_log_tables.assert_called_once()   # forecast tables logged to MLflow
         mock_render.assert_called_once()
 
+    @patch("src.ml_engineering.ml_orchestrator._log_forecast_tables")
     @patch("src.ml_engineering.ml_orchestrator._render_forecast_figures")
     @patch("src.ml_engineering.ml_orchestrator._persist_forecasts")
     @patch("src.ml_engineering.ml_7_model_inference.forecast_all_champions")
@@ -384,7 +431,7 @@ class TestRunForecastWiring(unittest.TestCase):
     @patch("src.ml_engineering.ml_orchestrator._configure_mlflow")
     def test_empty_registry_writes_nothing(
         self, mock_cfg, mock_engine, mock_ensure, mock_client_cls,
-        mock_forecast_all, mock_persist, mock_render,
+        mock_forecast_all, mock_persist, mock_render, mock_log_tables,
     ):
         mock_forecast_all.return_value = pd.DataFrame()
 
@@ -392,7 +439,50 @@ class TestRunForecastWiring(unittest.TestCase):
 
         self.assertEqual(n, 0)
         mock_persist.assert_not_called()
+        mock_log_tables.assert_not_called()
         mock_render.assert_not_called()
+
+
+class TestLogForecastTables(unittest.TestCase):
+    """Per-champion-run forecast table logging (mlflow.log_table) + idempotency."""
+
+    @staticmethod
+    def _client(existing_paths):
+        client = MagicMock()
+        client.list_artifacts.return_value = [MagicMock(path=p) for p in existing_paths]
+        return client
+
+    @patch("src.ml_engineering.ml_orchestrator.mlflow")
+    def test_logs_table_per_champion_run_when_absent(self, mock_mlflow):
+        mock_mlflow.start_run.return_value.__enter__.return_value = MagicMock()
+        client = self._client([])  # no prior forecast artifact
+        frame = pd.concat(
+            [_forecast_frame("T001081", [1, 2, 3, 4]),
+             _forecast_frame("301000", [1, 2, 3, 4])],
+            ignore_index=True,
+        )
+        n = _log_forecast_tables(client, frame)
+
+        self.assertEqual(n, 2)  # two distinct champion runs
+        self.assertEqual(mock_mlflow.log_table.call_count, 2)
+        for call in mock_mlflow.log_table.call_args_list:
+            self.assertEqual(call.kwargs.get("artifact_file"), "eval/forward_forecast.json")
+            # the run-id helper column is stripped from the logged table
+            self.assertNotIn("champion_run_id", call.args[0].columns)
+
+    @patch("src.ml_engineering.ml_orchestrator.mlflow")
+    def test_skips_runs_that_already_have_the_table(self, mock_mlflow):
+        client = self._client(["eval/forward_forecast.json"])  # already present
+        n = _log_forecast_tables(client, _forecast_frame("T001081", [1, 2, 3, 4]))
+        self.assertEqual(n, 0)
+        mock_mlflow.log_table.assert_not_called()
+
+    @patch("src.ml_engineering.ml_orchestrator.mlflow")
+    def test_no_champion_run_id_column_is_noop(self, mock_mlflow):
+        frame = _forecast_frame("T001081", [1, 2, 3, 4]).drop(columns=["champion_run_id"])
+        n = _log_forecast_tables(MagicMock(), frame)
+        self.assertEqual(n, 0)
+        mock_mlflow.log_table.assert_not_called()
 
 
 class TestRunReportWiring(unittest.TestCase):

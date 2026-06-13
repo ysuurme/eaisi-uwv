@@ -19,15 +19,18 @@ All-industry mode (default):
     python main.py <gold_table> <model_key> [sbi_filter_col] [group1,group2,...]
 
 Sector-specific mode:
-    python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
+    python main.py master_data_ml_preprocessed ridge BedrijfskenmerkenSBI2008_301000
 
 Sector sweep (all SBI sectors, one run each):
     python main.py master_data_ml_preprocessed baseline --all-sectors
 
+Model keys (ModelConfiguration catalog): baseline, autoets, stl_ets, chronos_bolt,
+ridge, random_forest, ridge_deseason.
+
 Examples:
     python main.py master_data_ml_preprocessed baseline
-    python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
-    python main.py master_data_ml_preprocessed random_forest - compensation,labor_volume
+    python main.py master_data_ml_preprocessed autoets BedrijfskenmerkenSBI2008_301000
+    python main.py master_data_ml_preprocessed random_forest - labor_structure,wages
     (use '-' as sbi_filter_col placeholder to skip it and specify feature groups)
 """
 import sys
@@ -91,7 +94,7 @@ def main() -> None:
         return
 
     gold_table    = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
-    model_key     = sys.argv[2] if len(sys.argv) > 2 else "linear"
+    model_key     = sys.argv[2] if len(sys.argv) > 2 else "baseline"
     # arg 3: sbi_filter_col — use '-' as a placeholder to skip (means all-industry)
     sbi_raw       = sys.argv[3] if len(sys.argv) > 3 else None
     sbi_filter_col = sbi_raw if (sbi_raw and sbi_raw != "-") else None

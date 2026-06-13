@@ -1,21 +1,30 @@
 """
-Step 6 — ML Model Validation (MAPE champion/challenger gate).
+Step 6 — ML Model Validation (MASE-gated champion/challenger gate).
 
 Decides promotion to the MLflow Model Registry and manages governance.
 Gate policy (ADR-001 / ADR-002):
 
 - There is ONE registered model per sector; its ``@prod`` alias is that
   sector's champion.
-- A challenger is promoted to ``@prod`` if and only if its MAPE is finite AND
-  strictly lower than the incumbent champion's MAPE.  If no champion exists
-  yet, the challenger is registered unconditionally (seed).
-- MAPE is the primary gate; R² is recorded but only gates when an optional
-  ``r2_floor`` is supplied (disabled by default).
+- **MASE is THE comparison metric** — Mean Absolute Scaled Error, the
+  outer-fold MAE scaled by the in-sample seasonal-naive (m=4) MAE (computed in
+  Step 5).  It is scale-free and comparable across sectors; **lower is better**
+  and **MASE < 1 beats the seasonal naive**.  The champion is the model with the
+  **lowest MASE** per sector: a challenger is promoted iff its MASE is finite and
+  strictly lower than the incumbent champion's MASE (or it seeds when none
+  exists).
+- **Optional floor** ``max_mase``: when set (e.g. 1.0), a challenger must also
+  clear MASE < ``max_mase`` to be promoted — "only promote models that beat the
+  seasonal naive".  ``None`` (default) disables the floor (pure lowest-MASE).
+- R² gates only when an optional ``r2_floor`` is supplied (disabled by default).
 - Losers are NOT registered.  The run is tagged ``passed_gate=false`` and its
   ``ModelEvaluationRecord`` row is updated, so failed runs stay diagnosable.
-- The promoted version carries ``mape`` / ``r2`` / ``model_family`` tags and a
-  human-readable description, so the team can read each registered model's
-  accuracy straight from the MLflow UI.
+- The promoted version carries the full interpretable metric set —
+  ``mase`` (THE cross-sector comparison metric, dimensionless; <1 beats the
+  naive), ``mae`` (the primary stakeholder metric, in percentage points — same
+  units as the target), ``mape`` (the foundational percentage-error metric) —
+  plus ``r2`` / ``model_family`` tags, so the registry self-describes each
+  champion.
 """
 import math
 import mlflow
@@ -46,23 +55,29 @@ class ModelValidator:
         feature_groups: str = "",
         sector_code: str = "",
         r2_floor: Optional[float] = None,
+        max_mase: Optional[float] = None,
         tags: Optional[dict] = None,
         description: str = "",
         session: Optional[Session] = None,
     ) -> bool:
-        """Run the MAPE champion/challenger gate; register + promote if it wins.
+        """Run the MASE champion/challenger gate; register + promote if it wins.
 
         Args:
             run_id: MLflow run that produced the candidate.
             registered_model_name: Sector-keyed registry name (ADR-002).
-            metrics: Must contain ``mape`` and ``r2`` (outer-fold honest values).
+            metrics: Must contain ``mase`` (THE comparison metric) + ``mae``
+                (stakeholder metric, percentage points) + ``mape`` / ``r2``
+                (outer-fold honest values).
             model_family: Estimator family (e.g. ``RandomForest_Reduced``);
                 stored as a version tag so the family survives the sector-only
                 registry name.
             sector_code: Sector label, for logging.
             r2_floor: Optional secondary R² floor.  None disables it (default).
+            max_mase: Optional MASE ceiling — a challenger must clear
+                ``MASE < max_mase`` (e.g. 1.0 = must beat the seasonal naive).
+                None (default) disables it: the champion is simply the lowest MASE.
             tags: Extra version tags to attach on promotion.
-            description: Optional version description; a MAPE/R²/family summary
+            description: Optional version description; a MASE/MAPE/family summary
                 is generated when omitted.
             session: When supplied, the matching ``ModelEvaluationRecord``'s
                 ``passed_gate`` field is updated.
@@ -70,33 +85,46 @@ class ModelValidator:
         Returns:
             True if the candidate was promoted to ``@prod``, else False.
         """
+        candidate_mase = metrics.get("mase", float("nan"))
         candidate_mape = metrics.get("mape", float("nan"))
+        candidate_mae = metrics.get("mae", float("nan"))
         candidate_r2 = metrics.get("r2", float("nan"))
-        champion_mape = self._champion_mape(registered_model_name)
+        champion_mase = self._champion_mase(registered_model_name)
 
-        promote = self._is_winner(candidate_mape, candidate_r2, champion_mape, r2_floor)
+        promote = self._is_winner(
+            candidate_mase, candidate_r2, champion_mase, r2_floor, max_mase=max_mase,
+        )
 
         # Tag the run + persist the gate result regardless of outcome, so failed
         # runs remain filterable in the UI and queryable in SQL.
         self._safe_set_run_tag(run_id, "passed_gate", "true" if promote else "false")
         self._update_sql_gate(session, run_id, promote)
 
+        mase_str = "n/a" if not math.isfinite(candidate_mase) else f"{candidate_mase:.4f}"
         if not promote:
-            champ = "none" if champion_mape is None else f"{champion_mape:.4f}"
+            champ = "none" if champion_mase is None else f"{champion_mase:.4f}"
+            floored = (
+                max_mase is not None and math.isfinite(candidate_mase)
+                and candidate_mase >= max_mase
+            )
+            reason = (
+                f"MASE {mase_str} ≥ floor {max_mase} (does not beat the bar)"
+                if floored else f"MASE={mase_str} vs champion {champ}"
+            )
             f_log(
-                f"Gate FAIL | {sector_code or registered_model_name} | "
-                f"candidate MAPE={candidate_mape:.4f} vs champion {champ}",
+                f"Gate FAIL | {sector_code or registered_model_name} | {reason}",
                 c_type="gate_fail",
             )
             return False
 
         version = self._register_and_promote(
             run_id, registered_model_name, model_family, model_type, feature_groups,
-            candidate_mape, candidate_r2, tags, description,
+            candidate_mase, candidate_mape, candidate_mae, candidate_r2, tags, description,
         )
         f_log(
             f"Promoted | {registered_model_name} v{version} -> @{_PROD_ALIAS} | "
-            f"MAPE={candidate_mape:.2%} R²={candidate_r2:.4f} family={model_family}",
+            f"MASE={mase_str} MAE={candidate_mae:.4f}pp MAPE={candidate_mape:.2%} "
+            f"R²={candidate_r2:.4f} family={model_family}",
             c_type="register",
         )
         return True
@@ -104,13 +132,20 @@ class ModelValidator:
     # ── gate decision ────────────────────────────────────────────────────
     @staticmethod
     def _is_winner(
-        candidate_mape: float,
+        candidate_mase: float,
         candidate_r2: float,
-        champion_mape: Optional[float],
+        champion_mase: Optional[float],
         r2_floor: Optional[float],
+        *,
+        max_mase: Optional[float] = None,
     ) -> bool:
-        """Pure decision: finite MAPE, optional R² floor, then beat the champion."""
-        if candidate_mape is None or not math.isfinite(candidate_mape):
+        """Pure decision: finite MASE, optional R² floor, optional MASE ceiling,
+        then beat the incumbent champion's MASE (lower is better).
+
+        ``max_mase`` (when set) rejects a challenger that does not clear
+        ``MASE < max_mase`` (e.g. 1.0 = must beat the seasonal naive).
+        """
+        if candidate_mase is None or not math.isfinite(candidate_mase):
             return False
         if r2_floor is not None and (
             candidate_r2 is None
@@ -118,17 +153,19 @@ class ModelValidator:
             or candidate_r2 < r2_floor
         ):
             return False
-        if champion_mape is None:
+        if max_mase is not None and candidate_mase >= max_mase:
+            return False
+        if champion_mase is None:
             return True  # seed: no incumbent to beat
-        return candidate_mape < champion_mape
+        return candidate_mase < champion_mase
 
-    def _champion_mape(self, registered_model_name: str) -> Optional[float]:
-        """Read the incumbent ``@prod`` champion's MAPE tag, or None if absent."""
+    def _champion_mase(self, registered_model_name: str) -> Optional[float]:
+        """Read the incumbent ``@prod`` champion's MASE tag, or None if absent."""
         try:
             mv = self.client.get_model_version_by_alias(registered_model_name, _PROD_ALIAS)
         except Exception:
             return None  # no registered model / no @prod alias yet
-        raw = (getattr(mv, "tags", None) or {}).get("mape")
+        raw = (getattr(mv, "tags", None) or {}).get("mase")
         try:
             return float(raw) if raw is not None else None
         except (TypeError, ValueError):
@@ -142,7 +179,9 @@ class ModelValidator:
         model_family: str,
         model_type: str,
         feature_groups: str,
+        mase: float,
         mape: float,
+        mae: float,
         r2: float,
         tags: Optional[dict],
         description: str,
@@ -150,16 +189,21 @@ class ModelValidator:
         """Register the run's model, stamp provenance tags, move ``@prod``.
 
         The version is made fully self-describing — model family, the underlying
-        algorithm (model_type), the config feature groups used, and the metrics —
-        so the registry is the single source of truth for downstream views.
+        algorithm (model_type), the config feature groups, and the metric set:
+        ``mase`` (THE cross-sector comparison metric), ``mae`` (the primary
+        stakeholder metric, in percentage points — same units as the target),
+        and ``mape`` (the foundational percentage-error metric) — so the registry
+        is the single source of truth for downstream views.
         """
         model_version = mlflow.register_model(f"runs:/{run_id}/model", registered_model_name)
         version = model_version.version
 
-        # Store MAPE/R² at full precision (repr round-trips exactly) so the
+        # Store MASE/MAE/MAPE/R² at full precision (repr round-trips exactly) so the
         # champion lookup compares the same value that produced the tag.
         # Rounding here would let an identical re-run falsely "beat" itself.
         version_tags = {
+            "mase": repr(float(mase)),
+            "mae": repr(float(mae)),
             "mape": repr(float(mape)),
             "r2": repr(float(r2)),
             "model_family": model_family,
@@ -170,7 +214,9 @@ class ModelValidator:
         for key, val in version_tags.items():
             self._safe_set_version_tag(registered_model_name, version, key, val)
 
-        summary = description or f"MAPE={mape:.2%} R²={r2:.4f} family={model_family}"
+        summary = description or (
+            f"MASE={mase:.4f} MAE={mae:.4f}pp MAPE={mape:.2%} R²={r2:.4f} family={model_family}"
+        )
         try:
             self.client.update_model_version(
                 name=registered_model_name, version=version, description=summary,
