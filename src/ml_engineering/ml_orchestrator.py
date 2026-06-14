@@ -307,6 +307,48 @@ def run_sector_sweep(
     f_log("Sector sweep complete.", c_type="complete")
 
 
+def run_full_sweep(
+    gold_table: str = "master_data_ml_preprocessed",
+    model_keys: Optional[List[str]] = None,
+    feature_groups: Optional[List[str]] = None,
+    n_test_points: int = 20,
+    r2_floor: Optional[float] = None,
+    max_mase: Optional[float] = None,
+) -> None:
+    """Run every model family across all SBI sectors → one eval DB.
+
+    The single "clean run" training entry point: loops ``run_sector_sweep`` over
+    every ``ModelConfiguration`` key (default: all of them) so each family writes
+    its walk-forward predictions/metrics to ``model_predictions`` /
+    ``model_evaluations`` and competes for each sector's ``@prod`` champion.
+
+    Pass ``model_keys`` to restrict the set — e.g. exclude the slow
+    ``chronos_bolt`` (CPU forward passes of a foundation model across every
+    sector × origin) for a fast iteration and run it separately overnight.
+    """
+    keys = model_keys or ModelConfiguration.get_all_keys()
+    f_log(
+        f"Full sweep | {len(keys)} model families × all sectors | {gold_table}",
+        c_type="start",
+    )
+    for i, key in enumerate(keys, 1):
+        f_log(f"Model family {i}/{len(keys)}: {key}", c_type="process")
+        try:
+            run_sector_sweep(
+                experiment_key=key,
+                gold_table=gold_table,
+                feature_groups=feature_groups,
+                n_test_points=n_test_points,
+                r2_floor=r2_floor,
+                max_mase=max_mase,
+            )
+        except Exception as exc:
+            # One bad family should not abort the whole sweep
+            f_log(f"Model family {key} failed: {exc}", c_type="error")
+
+    f_log("Full sweep complete.", c_type="complete")
+
+
 # ---------------------------------------------------------------------------
 # Forecast Production Entry Point (Step 7 wiring)
 # ---------------------------------------------------------------------------
@@ -532,6 +574,57 @@ def run_report(gold_table: str = "master_data_ml_preprocessed") -> Dict[str, Any
         c_type="complete",
     )
     return {"sectors": n_sectors, "figures": len(figs), "summary": str(summary_path)}
+
+
+def run_comparison(
+    eval_db_path: Optional[Path] = None,
+    gold_table: str = "master_data_ml_preprocessed",
+    output_dir: Optional[Path] = None,
+    variant_selection: str = "per_sector_honest",
+) -> Dict[str, Any]:
+    """Cross-method statistical comparison from the eval DB → ``reports/comparison/``.
+
+    Reads every model family's honest OUTER-fold predictions straight from the
+    eval DB (no parquets) via ``m_pipeline_loader.load_families_from_eval_db``,
+    aligns them on the shared (sector, target_date, horizon) keys, and runs the
+    full ``m_evaluation`` comparison: point / regime / per-sector / per-horizon
+    metrics, skill vs the baseline, prediction-interval calibration where
+    available, pairwise Diebold-Mariano + Friedman/Nemenyi tests, and the
+    operational + decision matrices.  Every table is written under
+    ``reports/comparison/``.
+
+    Needs ≥2 model families in ``model_predictions`` — run a sweep first
+    (``python main.py --full-sweep``).  Returns a small dict of counts/paths.
+    """
+    from src.utils import m_evaluation, m_pipeline_loader
+
+    f_log("Comparison | cross-method statistical comparison", c_type="start")
+    eval_db_path = eval_db_path or DIR_DB_EVAL
+    out_dir = output_dir or (PROJECT_ROOT / "reports" / "comparison")
+
+    family_dfs, baseline_df, _winners = m_pipeline_loader.load_families_from_eval_db(
+        eval_db_path, variant_selection=variant_selection,
+    )
+    if len(family_dfs) < 2:
+        f_log(
+            f"Comparison needs ≥2 model families in model_predictions; found "
+            f"{len(family_dfs)}. Run a sweep first (e.g. python main.py --full-sweep).",
+            c_type="warning",
+        )
+        return {"families": len(family_dfs), "output_dir": str(out_dir)}
+
+    baseline = baseline_df if (baseline_df is not None and not baseline_df.empty) else None
+    m_evaluation.compare_all_models(
+        family_dfs, baseline_df=baseline, output_dir=out_dir, verbose=True,
+    )
+
+    family_names = [d["model_name"].iloc[0] for d in family_dfs]
+    f_log(
+        f"Comparison complete | {len(family_dfs)} families "
+        f"({', '.join(family_names)}) → {out_dir.relative_to(PROJECT_ROOT)}",
+        c_type="complete",
+    )
+    return {"families": len(family_dfs), "models": family_names, "output_dir": str(out_dir)}
 
 
 # ---------------------------------------------------------------------------

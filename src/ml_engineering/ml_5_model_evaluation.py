@@ -79,11 +79,12 @@ import mlflow
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_absolute_percentage_error,
-    mean_squared_error,
-    r2_score,
+from src.utils.m_evaluation import (
+    mae as _mae,
+    mape as _mape,
+    r2 as _r2,
+    rmse as _rmse,
+    seasonal_naive_mae as _seasonal_naive_mae,
 )
 from sktime.forecasting.base import ForecastingHorizon
 from sqlalchemy.orm import Session
@@ -418,10 +419,10 @@ def _walk_forward_metrics(
     if outer_y_true:
         yt = np.array(outer_y_true)
         yp = np.array(outer_y_pred)
-        r2   = float(r2_score(yt, yp))
-        mae  = float(mean_absolute_error(yt, yp))
-        mape = float(mean_absolute_percentage_error(yt, yp))
-        rmse = float(np.sqrt(mean_squared_error(yt, yp)))
+        r2   = _r2(yt, yp)
+        mae  = _mae(yt, yp)
+        mape = _mape(yt, yp)
+        rmse = _rmse(yt, yp)
     elif inner_y_true:
         # CV truncated before reaching outer folds — fall back with a warning
         f_log(
@@ -431,17 +432,17 @@ def _walk_forward_metrics(
         )
         yt = np.array(inner_y_true)
         yp = np.array(inner_y_pred)
-        r2   = float(r2_score(yt, yp))
-        mae  = float(mean_absolute_error(yt, yp))
-        mape = float(mean_absolute_percentage_error(yt, yp))
-        rmse = float(np.sqrt(mean_squared_error(yt, yp)))
+        r2   = _r2(yt, yp)
+        mae  = _mae(yt, yp)
+        mape = _mape(yt, yp)
+        rmse = _rmse(yt, yp)
     else:
         r2 = mae = mape = rmse = float("nan")
         f_log("Walk-forward produced no predictions at all.", c_type="error")
 
     # --- Inner-fold diagnostic MAE ---
     mae_inner_diag = (
-        float(mean_absolute_error(inner_y_true, inner_y_pred))
+        _mae(inner_y_true, inner_y_pred)
         if inner_y_true else float("nan")
     )
 
@@ -500,18 +501,6 @@ def _walk_forward_metrics(
         "n_outer":    n_outer_actual,
     }
     return {"mase": mase, "r2": r2, "mae": mae, "mape": mape, "rmse": rmse}, pred_records, diagnostics
-
-
-def _seasonal_naive_mae(y_train, sp: int = 4) -> float:
-    """In-sample MAE of the seasonal-naive forecast — the MASE scaler.
-
-    ``mean |y_t - y_{t-sp}|`` over the TRAINING window (sp=4 = same quarter last
-    year for quarterly data).  Returns NaN if the window is too short.
-    """
-    y = np.asarray(y_train, dtype=float)
-    if len(y) <= sp:
-        return float("nan")
-    return float(np.mean(np.abs(y[sp:] - y[:-sp])))
 
 
 def _build_eval_tables(

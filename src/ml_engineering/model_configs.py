@@ -855,6 +855,11 @@ class ModelConfiguration:
         return [cls.get(key) for key in cls._CATALOG.keys()]
 
     @classmethod
+    def get_all_keys(cls) -> List[str]:
+        """Returns every catalog key — the full set of model families for a sweep."""
+        return list(cls._CATALOG.keys())
+
+    @classmethod
     def get_tuning_suite(cls) -> List[ModelExperiment]:
         """Returns only models that have a non-empty param_grid (isolated copies)."""
         return [cls.get(key) for key, exp in cls._CATALOG.items() if exp.param_grid]

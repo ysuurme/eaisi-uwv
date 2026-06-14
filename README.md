@@ -1,5 +1,7 @@
 # EAISI UWV
 
+> **📐 Architecture & navigation:** start with **[CONTEXT.md](CONTEXT.md)** — bounded contexts, the **Module Map**, and an **Issue-Type → Files** index for finding the right file fast. Deeper architecture/standards live in [AGENTS.md](AGENTS.md); the working backlog in [ISSUES.md](ISSUES.md). *(AGENTS.md and ISSUES.md are local/gitignored.)*
+
 ## Table of Contents
 
 - [🚀 Quick Start](#quick-start)
@@ -32,7 +34,7 @@ uv run main.py [gold_table] [model_key] [sbi_filter_col] [group1,group2,...]
 | Arg | Default | Description |
 |-----|---------|-------------|
 | `gold_table` | `master_data_ml_preprocessed` | Gold feature store table name |
-| `model_key` | `linear` | Key from the ModelConfiguration catalog |
+| `model_key` | `baseline` | Key from the ModelConfiguration catalog |
 | `sbi_filter_col` | *(omit)* | OHE column to isolate one sector, e.g. `BedrijfskenmerkenSBI2008_301000`. Omit for national total (T001081). Use `-` as a placeholder to skip when specifying feature groups. |
 | `feature_groups` | *(omit)* | Comma-separated catalog group names, e.g. `compensation,labor_volume` |
 
@@ -48,11 +50,19 @@ uv run main.py master_data_ml_preprocessed baseline BedrijfskenmerkenSBI2008_301
 # All sectors at once — one MLflow run per sector, same experiment
 uv run main.py master_data_ml_preprocessed baseline --all-sectors
 
-# Linear model, skip SBI arg, use specific feature groups
-uv run main.py master_data_ml_preprocessed linear - compensation,working_conditions
+# Ridge (feature-ML), skip the SBI arg with '-', use specific catalog feature groups
+uv run main.py master_data_ml_preprocessed ridge - labor_structure,wages
+```
 
-# Refresh underlying data pipeline before ML execution
-uv run main.py --refresh-data
+**Lifecycle verbs** — the whole flow runs from `main.py`:
+
+```bash
+uv run main.py --refresh-data        # raw → bronze → silver → gold
+uv run main.py --select-features     # gold → statistical funnel → feature_catalog.json
+uv run main.py --full-sweep          # every model family × all sectors → eval DB (the "clean run")
+uv run main.py --compare             # cross-method scorecard + decision matrix → reports/comparison/
+uv run main.py --forecast            # forward 4Q from every @prod champion → model_forecasts + figures
+uv run main.py --report              # leaderboard, winners quadrant, figures/CSVs, narrative summary
 ```
 
 **Available model keys:** `baseline`, `autoets`, `stl_ets`, `chronos_bolt`, `ridge`, `random_forest`, `ridge_deseason` (curated comparison set — see the Estimator Catalog below)
@@ -68,11 +78,11 @@ uv run mlflow-ui
 
 🌐 **Open**: [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
-All runs land in the `master_SickLeave_4Q` experiment, tagged with `sector` and `forecast_horizon=4Q` for easy cross-sector comparison. The metric set is deliberately small and interpretable:
+All runs land in the `master_SickLeave_4Q` experiment, tagged with `sector` and `forecast_horizon=4Q` for easy cross-sector comparison. The business headline is **two numbers** — *is it good?* (MASE) and *how far off?* (MAE):
 
-- **MAE** (in percentage points) — the primary **stakeholder** metric: how far off, on average, in the same units as the target (sick-leave %).
-- **MAPE** — the foundational percentage-error metric (relative `|y−ŷ|/|y|`).
 - **MASE** (Mean Absolute Scaled Error — outer-fold MAE scaled by the in-sample seasonal-naive m=4 MAE) — **THE comparison metric** and quality gate: scale-free and comparable across sectors with different baseline difficulty, lower is better, and **MASE < 1 beats the seasonal naive**.
+- **MAE** (in percentage points) — the primary **stakeholder** magnitude: how far off, on average, in the same units as the target (sick-leave %).
+- **MAPE** (relative `|y−ŷ|/|y|`) — retained as a **diagnostic** (eval DB + `reports/sector_quality.csv`), not part of the headline; MASE already gives the scale-free cross-sector view.
 
 Each sector has one registered model whose `@prod` alias is its current champion (the lowest-MASE model seen so far); R²/RMSE are recorded alongside as secondary diagnostics.
 
@@ -104,29 +114,28 @@ References:
 
 ```text
 eaisi-uwv/
-├── data/                       # Data storage (raw, medallion db's and MLFlow registry db)
-├── docs/                       # Documentation
-├── models/                     # Model artifacts
-├── notebooks/                  # Non-production experimentation
-│   ├── data_exploration/       # Data exploration and schema analysis
-│   └── ml_experimentation/     # ML experimentation and baseline models
-├── src/                        # Production-ready source code
-│   ├── data_engineering/       # Data Medallion Pipeline (Raw, Bronze, Silver, Gold)
-│   ├── ml_engineering/         # ML Lifecycle (Modular 6-Step Pipeline)
-│   │   ├── ml_orchestrator.py  # Pipeline Hub (Step 0) + run_sector_sweep()
-│   │   ├── ml_1_data_extraction.py
-│   │   ├── ml_2_data_validation.py
-│   │   ├── ml_3_data_preparation.py
-│   │   ├── ml_4_model_training.py
-│   │   ├── ml_5_model_evaluation.py
-│   │   ├── ml_6_model_validation.py
-│   │   └── model_configs.py    # Estimator Catalog, ORM Definitions, SectorQuarterRollingMean
-│   ├── utils/                  # Shared utilities and database handlers
-│   └── config.py               # Project-wide configuration
-├── main.py                     # Entry point for product orchestration
-├── pyproject.toml              # Dependency management (UV)
-└── README.md                   # Project overview
+├── data/                       # Medallion + eval SQLite DBs (0_raw … 4_eval, feature_selection); gitignored
+├── reports/                    # Exported figures + CSVs (--report); reports/comparison/ (--compare)
+├── notebooks/                  # Non-production experimentation (reference, no-copy; _legacy/ = retired)
+│   ├── data_exploration/       # EDA and schema analysis
+│   └── ml_experimentation/     # Model experiments + cv_output parquets
+├── src/                        # Production source code
+│   ├── data_engineering/       # Medallion pipeline: data_loader_{raw,bronze,silver,gold}.py
+│   ├── ml_engineering/         # ML lifecycle — numbered 7-step pipeline + orchestrator + catalog
+│   │   ├── ml_orchestrator.py  # Hub: run_pipeline / run_sector_sweep / run_full_sweep /
+│   │   │                       #      run_feature_selection / run_forecast / run_comparison / run_report
+│   │   ├── ml_1_data_extraction.py  …  ml_7_model_inference.py
+│   │   └── model_configs.py    # Estimator catalog, ORM tables, SectorQuarterRollingMean baseline
+│   ├── utils/                  # m_* helpers — m_evaluation, m_pipeline_loader, m_model_viz,
+│   │                           #   m_sector_quality, m_log, m_query_database, m_sbi_classifier, …
+│   └── config.py               # Project-wide config + CBS_TABLE_REGISTRY
+├── main.py                     # CLI entry point (orchestration)
+├── CONTEXT.md                  # ← architecture & navigation index (start here)
+├── pyproject.toml              # Dependencies (uv)
+└── README.md
 ```
+
+→ See **[CONTEXT.md](CONTEXT.md)** for the authoritative Module Map, bounded contexts, and the Issue-Type → Files index.
 
 ## Project Contributions
 
@@ -307,11 +316,19 @@ A curated 7-model comparison set spanning the univariate-vs-multivariate questio
 
 **5. Model Evaluation (`ml_5_model_evaluation.py`)**
 - Walk-forward (rolling-origin) evaluation with nested inner/outer folds; headline metrics are computed on the honest **outer** folds.
-- Computes **MASE** (THE comparison metric — outer-fold MAE scaled by the in-sample seasonal-naive m=4 MAE), **MAE** (percentage points — the stakeholder metric), **MAPE** (the percentage-error fundament), plus R², RMSE on the 4-quarter-ahead forecasts and logs them to MLflow (MASE as `mean_absolute_scaled_error`). Per-row predictions are persisted for cross-model comparison.
+- Computes **MASE** (THE comparison metric — outer-fold MAE scaled by the in-sample seasonal-naive m=4 MAE) and **MAE** (percentage points — the stakeholder magnitude) as the headline pair, plus **MAPE**, R², RMSE as diagnostics, on the 4-quarter-ahead forecasts and logs them to MLflow (MASE as `mean_absolute_scaled_error`). Per-row predictions are persisted for cross-model comparison.
 
 **6. Model Validation & Registry (`ml_6_model_validation.py`)**
 - **MASE champion/challenger gate**: one registered model per sector (sector-keyed name). A challenger is promoted to `@prod` only if its MASE is finite and strictly lower than the incumbent champion's MASE — or seeded unconditionally when no champion exists yet. An optional `max_mase` ceiling (default disabled) additionally requires `MASE < max_mase` (e.g. 1.0 = must beat the seasonal naive). Losing runs stay diagnosable (`passed_gate=false`) but are not registered, so the registry only grows on genuine improvement.
 - R² is recorded alongside (optional `r2_floor`, disabled by default). The promoted version **self-describes** via tags `mase` / `mae` / `mape` / `r2` / `model_family` / `model_type` / `feature_groups`, so the registry alone tells you each champion's comparison score, stakeholder accuracy (pp), algorithm, and the config features it used.
+
+**7. Model Inference / Forward Forecast (`ml_7_model_inference.py`)**
+- Resolves each sector's `@prod` champion, rebuilds it from its MLflow lineage, **refits on the full observed history**, and forecasts the next 4 quarters with production-honest future X. `main.py --forecast` persists these to `model_forecasts` and renders one overlay figure per sector.
+
+### Cross-method comparison (`--compare`) and reporting (`--report`)
+- **`--full-sweep`** runs every catalog family across all sectors so they all compete for each sector's `@prod` slot in one command.
+- **`--compare`** (`m_pipeline_loader.load_families_from_eval_db` → `m_evaluation.compare_all_models`) aligns every family on the shared (sector, target_date, horizon) keys and writes a scorecard + decision matrix to `reports/comparison/`: point/regime metrics, skill vs the baseline, and Diebold-Mariano + Friedman/Nemenyi significance tests.
+- **`--report`** regenerates the figure bundle — leaderboard, **winners quadrant** (each sector's champion by paradigm) and win counts, predicted-vs-actual, experiment matrix, horizon decay, forecast overlays — plus `reports/sector_quality.csv` and a narrative summary under `.claude/`.
 
 ### Sector Performance Read-Model (`m_sector_quality.py`)
 MLflow is the single source of truth (each sector's `@prod` champion self-describes). For visualizations and downstream apps, `refresh_sector_performance()` materialises a denormalised **`sector_performance`** table in the eval DB — a refresh-only projection that joins each champion with the baseline MASE and the CBS SBI hierarchy:

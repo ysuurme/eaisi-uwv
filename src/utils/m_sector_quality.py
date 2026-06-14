@@ -720,30 +720,44 @@ def build_narrative_markdown(
     if perf is not None and not perf.empty and "tier" in perf.columns:
         counts = perf["tier"].value_counts().to_dict()
         good, medium, poor = counts.get("Good", 0), counts.get("Medium", 0), counts.get("Poor", 0)
+        fam_counts = (perf["model_family"].fillna("—").value_counts()
+                      if "model_family" in perf.columns else pd.Series(dtype=int))
+        n_beat = int((pd.to_numeric(perf.get("mase"), errors="coerce") < 1.0).sum())
+        if not fam_counts.empty:
+            winners_line = (
+                f"- **Winners**: {fam_counts.index[0]} leads with {int(fam_counts.iloc[0])} of "
+                f"{len(perf)} sectors; **{n_beat} of {len(perf)} champions beat the seasonal "
+                f"naive** (MASE < 1)."
+            )
+        else:
+            winners_line = (f"- **Winners**: {n_beat} of {len(perf)} champions beat the "
+                            f"seasonal naive (MASE < 1).")
         lines += [
             "## Headline",
             f"- **{good} Good** · **{medium} Medium** · **{poor} Poor** "
             f"({len(perf)} sector champions).",
-            "- **Metric set** (deliberately small, for interpretability): "
-            "**MAE** (percentage points) is the primary stakeholder metric — how "
-            "far off, on average, in the same units as the target; **MAPE** is the "
-            "foundational percentage-error metric; **MASE** is THE cross-sector "
-            "comparison metric (outer-fold MAE scaled by the in-sample "
-            "seasonal-naive m=4 MAE — dimensionless, lower is better, <1 beats the "
-            "naive).",
+            winners_line,
+            "- **Metric set** (a two-number business headline): **MAE** "
+            "(percentage points) is the primary stakeholder magnitude — how far "
+            "off, on average, in the same units as the target; **MASE** is THE "
+            "cross-sector comparison metric and the champion gate (outer-fold MAE "
+            "scaled by the in-sample seasonal-naive m=4 MAE — dimensionless, lower "
+            "is better, <1 beats the naive).  *MAPE* (relative error) is retained "
+            "as a diagnostic in the eval DB and `reports/sector_quality.csv`, not "
+            "in the headline.",
             f"- Sectors are ranked and tiered by **MASE**: *Good* = MASE ≤ {GOOD_MASE}; "
             f"*Medium* = {GOOD_MASE} < MASE < 1; *Poor* = MASE ≥ 1 (does not beat the naive).",
             "",
             "## Per-sector champions",
             "",
-            "| Sector | SBI title | Champion | Model type | MAE (pp) | MAPE | MASE | Baseline MASE | Tier |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| Sector | SBI title | Champion | Model type | MAE (pp) | MASE | Baseline MASE | Tier |",
+            "|---|---|---|---|---|---|---|---|",
         ]
         for _, r in perf.iterrows():
             lines.append(
                 f"| {r.get('sector_code','')} | {str(r.get('sbi_title','') or '')[:40]} "
                 f"| {r.get('model_family','')} | {r.get('model_type','') or ''} "
-                f"| {_fmt_pp(r.get('champion_mae'))} | {_fmt_pct(r.get('champion_mape'))} "
+                f"| {_fmt_pp(r.get('champion_mae'))} "
                 f"| {_fmt_mase(r.get('mase'))} | {_fmt_mase(r.get('baseline_mase'))} "
                 f"| {r.get('tier','')} |"
             )

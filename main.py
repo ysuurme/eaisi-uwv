@@ -15,6 +15,12 @@ Forward forecast (every @prod champion → model_forecasts + figures):
 Champion-based report (refresh read-models + regenerate all figures/CSVs + summary):
     python main.py --report
 
+Full sweep (every model family × all sectors → eval DB; the "clean run"):
+    python main.py --full-sweep
+
+Cross-method comparison (eval DB → reports/comparison/ scorecard + decision matrix):
+    python main.py --compare
+
 All-industry mode (default):
     python main.py <gold_table> <model_key> [sbi_filter_col] [group1,group2,...]
 
@@ -37,8 +43,10 @@ import sys
 
 from src.config import START_MLFLOW_UI
 from src.ml_engineering.ml_orchestrator import (
+    run_comparison,
     run_feature_selection,
     run_forecast,
+    run_full_sweep,
     run_pipeline,
     run_report,
     run_sector_sweep,
@@ -91,6 +99,18 @@ def main() -> None:
         sys.argv.remove("--report")
         gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
         run_report(gold_table=gold_table)
+        return
+
+    if "--full-sweep" in sys.argv:
+        sys.argv.remove("--full-sweep")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_full_sweep(gold_table=gold_table)
+        return
+
+    if "--compare" in sys.argv:
+        sys.argv.remove("--compare")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_comparison(gold_table=gold_table)
         return
 
     gold_table    = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"

@@ -1,2 +1,2 @@
 sector_code,sbi_title,sbi_level,model_family,model_type,feature_groups,mase,baseline_mase,champion_mae,champion_mape,r2,tier,refreshed_at
-T001081,A-U Alle economische activiteiten,totaal,AutoETS_Stat,AutoETS,"[""structural_only""]",0.8405240141422675,2.4580712788259955,0.13297842611803037,0.02556222688936145,0.7434707620616492,Good,2026-06-13 15:37:30
+T001081,A-U Alle economische activiteiten,totaal,AutoETS_Stat,AutoETS,"[""structural_only""]",0.8405240141422675,2.4580712788259955,0.13297842611803037,0.02556222688936145,0.7434707620616492,Good,2026-06-14 10:15:34

@@ -1,4 +1,9 @@
 """
+RETIRED (archived 2026-06) — superseded by ``python main.py --report`` (the
+``sector_performance`` read-model + leaderboard) and ``python main.py --compare``.
+Kept for reference only; it ranks on ``r2_pre2023`` / ``r2_post2023`` metrics that
+ml_5 no longer logs, so it will not run as-is against the current eval DB.
+
 Per-sector overnight summary: best ML model vs baseline and structural floor.
 
 Pulls every MLflow run from the eval database, picks the best-performing

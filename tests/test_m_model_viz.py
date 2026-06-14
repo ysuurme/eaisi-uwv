@@ -17,6 +17,8 @@ import pandas as pd  # noqa: E402
 from src.utils.m_model_viz import (  # noqa: E402
     leaderboard,
     plot_sector_leaderboard,
+    plot_method_win_counts,
+    plot_winners_quadrant,
     plot_predicted_vs_actual,
     plot_forecast,
     plot_matrix_heatmap,
@@ -24,6 +26,7 @@ from src.utils.m_model_viz import (  # noqa: E402
     plot_forecast_overlay,
     plot_importance_bars,
     save_figure,
+    _classify_paradigm,
 )
 
 
@@ -130,6 +133,28 @@ class TestPlots(unittest.TestCase):
             out = save_figure(fig, Path(d) / "figures" / "leaderboard.png")
             self.assertTrue(out.exists())
             self.assertGreater(out.stat().st_size, 0)
+
+
+class TestWinnerViews(unittest.TestCase):
+    def test_win_counts_returns_figure_and_empty(self):
+        self.assertIsInstance(plot_method_win_counts(_quality_df()), Figure)
+        self.assertIsInstance(plot_method_win_counts(pd.DataFrame()), Figure)
+
+    def test_quadrant_returns_figure_and_empty(self):
+        self.assertIsInstance(plot_winners_quadrant(_quality_df()), Figure)
+        self.assertIsInstance(plot_winners_quadrant(pd.DataFrame()), Figure)
+
+    def test_paradigm_classification(self):
+        # univariate + explainable (bottom-left)
+        self.assertEqual(_classify_paradigm("AutoETS_Stat", "AutoETS"), (-0.5, -0.5))
+        # univariate + black-box (top-left)
+        self.assertEqual(_classify_paradigm("ChronosBolt_Stat", "Chronos"), (-0.5, 0.5))
+        # multivariate + explainable (bottom-right)
+        self.assertEqual(_classify_paradigm("Ridge_Reduced", "Ridge"), (0.5, -0.5))
+        # multivariate + black-box (top-right)
+        self.assertEqual(_classify_paradigm("RandomForest_Reduced", "RandomForest"), (0.5, 0.5))
+        # unknown family falls back to keyword heuristics (forest → multi + black)
+        self.assertEqual(_classify_paradigm("HistGBR_Reduced", ""), (0.5, 0.5))
 
 
 if __name__ == "__main__":

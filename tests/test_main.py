@@ -126,6 +126,32 @@ class TestMain(unittest.TestCase):
         mock_run.assert_not_called()
 
     @patch("main.run_pipeline")
+    @patch("main.run_full_sweep")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_full_sweep_flag(self, mock_ui, mock_sweep, mock_run):
+        """--full-sweep runs the all-families sweep and exits (single-model run not used)."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "--full-sweep"]):
+            from main import main
+            main()
+
+        mock_sweep.assert_called_once_with(gold_table="master_data_ml_preprocessed")
+        mock_run.assert_not_called()
+
+    @patch("main.run_pipeline")
+    @patch("main.run_comparison")
+    @patch("main.ensure_mlflow_ui")
+    def test_main_compare_flag(self, mock_ui, mock_compare, mock_run):
+        """--compare runs the cross-method comparison and exits (no training)."""
+        import sys
+        with patch.object(sys, "argv", ["main.py", "--compare"]):
+            from main import main
+            main()
+
+        mock_compare.assert_called_once_with(gold_table="master_data_ml_preprocessed")
+        mock_run.assert_not_called()
+
+    @patch("main.run_pipeline")
     @patch("main.ensure_mlflow_ui")
     def test_main_feature_groups_parsed(self, mock_ui, mock_run):
         """Verify CLI feature group names are split and passed correctly (with sbi col)."""

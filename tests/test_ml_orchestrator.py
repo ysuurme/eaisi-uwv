@@ -18,8 +18,10 @@ from src.ml_engineering.ml_orchestrator import (
     _log_forecast_tables,
     _partition_candidates,
     _persist_forecasts,
+    run_comparison,
     run_feature_selection,
     run_forecast,
+    run_full_sweep,
     run_pipeline,
     run_report,
 )
@@ -536,6 +538,59 @@ class TestRunReportWiring(unittest.TestCase):
 
         mock_viz_all.assert_called_once()
         self.assertEqual(result["sectors"], 0)
+
+
+class TestRunComparisonWiring(unittest.TestCase):
+    """run_comparison loads families from the eval DB and feeds compare_all_models."""
+
+    @patch("src.utils.m_evaluation.compare_all_models")
+    @patch("src.utils.m_pipeline_loader.load_families_from_eval_db")
+    def test_loads_families_and_compares(self, mock_load, mock_compare):
+        df_a = pd.DataFrame({"model_name": ["AutoETS_Stat"]})
+        df_b = pd.DataFrame({"model_name": ["Pipeline"]})
+        baseline = pd.DataFrame({"model_name": ["baseline"]})
+        mock_load.return_value = ([df_a, df_b], baseline, {})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.ml_engineering.ml_orchestrator.PROJECT_ROOT", Path(tmp)):
+                result = run_comparison(gold_table="master_data_ml_preprocessed")
+
+        mock_load.assert_called_once()
+        mock_compare.assert_called_once()
+        # the scorecard is written under reports/comparison and baseline is passed
+        _, kwargs = mock_compare.call_args
+        self.assertIn("comparison", str(kwargs["output_dir"]))
+        self.assertIsNotNone(kwargs["baseline_df"])
+        self.assertEqual(result["families"], 2)
+        self.assertEqual(result["models"], ["AutoETS_Stat", "Pipeline"])
+
+    @patch("src.utils.m_evaluation.compare_all_models")
+    @patch("src.utils.m_pipeline_loader.load_families_from_eval_db")
+    def test_skips_when_fewer_than_two_families(self, mock_load, mock_compare):
+        mock_load.return_value = ([pd.DataFrame({"model_name": ["AutoETS_Stat"]})],
+                                  pd.DataFrame(), {})
+        result = run_comparison()
+        mock_compare.assert_not_called()
+        self.assertEqual(result["families"], 1)
+
+
+class TestRunFullSweep(unittest.TestCase):
+    """run_full_sweep loops run_sector_sweep over every model family."""
+
+    @patch("src.ml_engineering.ml_orchestrator.run_sector_sweep")
+    def test_runs_every_model_family_once(self, mock_sweep):
+        from src.ml_engineering.model_configs import ModelConfiguration
+        run_full_sweep(gold_table="t")
+        keys = ModelConfiguration.get_all_keys()
+        self.assertEqual(mock_sweep.call_count, len(keys))
+        called = [c.kwargs["experiment_key"] for c in mock_sweep.call_args_list]
+        self.assertEqual(called, keys)
+
+    @patch("src.ml_engineering.ml_orchestrator.run_sector_sweep")
+    def test_subset_and_resilient_to_one_failure(self, mock_sweep):
+        mock_sweep.side_effect = [None, RuntimeError("boom")]  # 2nd family fails
+        run_full_sweep(gold_table="t", model_keys=["baseline", "ridge"])
+        self.assertEqual(mock_sweep.call_count, 2)  # did not abort the sweep
 
 
 if __name__ == "__main__":
