@@ -78,6 +78,177 @@ _VALID_MODES = ("per_sector_honest", "global", "per_sector_legacy")
 _DEFAULT_TABLE_PRIORITY = ("model_predictions", "model_evaluation_records")
 _BASELINE_PREFIX = "SectorQuarterRollingMean"
 
+# Family display names for the cross-method comparison.  A "family" is the
+# model_name with its trailing _<sector> stripped (i.e. the ModelConfiguration
+# .name).  The reducer families collapse into a single "Pipeline" competitor;
+# the stat families map to the operational-table keys used by m_evaluation.
+_PIPELINE_FAMILIES = ("Ridge_Reduced", "RandomForest_Reduced", "RidgeDeseason_Reduced")
+_FAMILY_DISPLAY = {
+    "AutoETS_Stat":     "AutoETS_Stat",
+    "STLETS_Stat":      "STL_ETS",
+    "ChronosBolt_Stat": "Chronos_Bolt",
+}
+
+
+def _load_predictions_df(
+    eval_db_path: "str | Path",
+    table: Optional[str] = None,
+    run_filter: Optional[dict] = None,
+) -> Tuple[pd.DataFrame, dict]:
+    """Read + normalise the predictions table into the working frame shared by
+    the per-sector-honest selectors and the per-family comparison loader.
+
+    Returns ``(df, meta)`` where ``df`` carries ``sector_code, model_name,
+    target_date, origin_date, horizon, y_true, y_pred, fold_set, [run_id], _ae``
+    and ``meta`` is ``{table, has_fold_set, has_run_id, variant_keys}``.  Reads
+    only; disposes the SQLAlchemy engine (Windows lock-safety).
+    """
+    from sqlalchemy import create_engine, inspect as sa_inspect
+
+    eval_db_path = Path(eval_db_path)
+    if not eval_db_path.exists():
+        raise FileNotFoundError(f"Eval DB not found: {eval_db_path}")
+
+    engine = create_engine(f"sqlite:///{eval_db_path.as_posix()}")
+    try:
+        insp = sa_inspect(engine)
+        existing_tables = set(insp.get_table_names())
+
+        # ── Pick predictions table ────────────────────────────────────────
+        if table is None:
+            table = next((t for t in _DEFAULT_TABLE_PRIORITY if t in existing_tables), None)
+            if table is None:
+                raise ValueError(
+                    f"No predictions table found in {eval_db_path}. "
+                    f"Expected one of {_DEFAULT_TABLE_PRIORITY}; available: {sorted(existing_tables)}"
+                )
+
+        # ── Inspect schema to choose the right column names ───────────────
+        cols = {c["name"] for c in insp.get_columns(table)}
+
+        if "origin_date" in cols:
+            origin_col = "origin_date"
+        elif "fold_origin_date" in cols:
+            origin_col = "fold_origin_date"
+        else:
+            raise ValueError(
+                f"Table {table} missing an origin-date column (origin_date / fold_origin_date)"
+            )
+
+        if "horizon" in cols:
+            horizon_col = "horizon"
+        elif "horizon_step" in cols:
+            horizon_col = "horizon_step"
+        else:
+            raise ValueError(f"Table {table} missing a horizon column (horizon / horizon_step)")
+
+        has_fold_set = "fold_set" in cols
+        has_run_id   = "run_id" in cols
+        required     = {"sector_code", "model_name", "y_true", "y_pred", "target_date"}
+        missing      = required - cols
+        if missing:
+            raise ValueError(
+                f"Table {table} missing required columns: {missing}.  Available: {sorted(cols)}"
+            )
+
+        # ── Build SQL select ──────────────────────────────────────────────
+        select_cols = [
+            "sector_code", "model_name", "target_date",
+            f'{origin_col} AS origin_date',
+            f'{horizon_col} AS horizon',
+            "y_true", "y_pred",
+        ]
+        if has_fold_set:
+            select_cols.append("fold_set")
+        if has_run_id:
+            select_cols.append("run_id")
+
+        sql = f'SELECT {", ".join(select_cols)} FROM "{table}"'
+        df  = pd.read_sql(sql, engine)
+    finally:
+        engine.dispose()
+
+    if df.empty:
+        raise ValueError(f"Table {table} is empty.")
+
+    # ── Apply run_filter if provided ──────────────────────────────────────
+    if run_filter:
+        for k, v in run_filter.items():
+            if k not in df.columns:
+                raise ValueError(f"run_filter key '{k}' not in {table} columns")
+            df = df[df[k] == v]
+        if df.empty:
+            raise ValueError(f"run_filter {run_filter} returned 0 rows")
+
+    df = df.copy()
+    df["sector_code"] = df["sector_code"].astype(str)
+    df["model_name"]  = df["model_name"].astype(str)
+    df["target_date"] = pd.to_datetime(df["target_date"])
+    df["origin_date"] = pd.to_datetime(df["origin_date"])
+
+    # ── Handle absent fold_set (legacy data) ──────────────────────────────
+    if not has_fold_set:
+        warnings.warn(
+            "Predictions table has no 'fold_set' column. Falling back to "
+            "treating every row as 'outer' — variant selection cannot use "
+            "inner folds and will be test-set biased. Re-run the sector sweep "
+            "(main.py <table> <model> --all-sectors) with the updated "
+            "ml_5_model_evaluation.py to enable honest CV.",
+            stacklevel=2,
+        )
+        df["fold_set"] = "outer"
+    else:
+        df["fold_set"] = df["fold_set"].astype(str)
+
+    # ── Variant identifier construction ───────────────────────────────────
+    if has_run_id:
+        df["run_id"] = df["run_id"].astype(str)
+        variant_keys = ["model_name", "run_id"]
+    else:
+        warnings.warn(
+            "Predictions table has no 'run_id' column. Variants will be "
+            "identified by model_name only — preset-level variation will be "
+            "collapsed together. Re-run pipeline to capture run_id.",
+            stacklevel=2,
+        )
+        variant_keys = ["model_name"]
+
+    df["_ae"] = (df["y_pred"] - df["y_true"]).abs()
+
+    return df, {
+        "table": table,
+        "has_fold_set": has_fold_set,
+        "has_run_id": has_run_id,
+        "variant_keys": variant_keys,
+    }
+
+
+def _to_canonical(selected: pd.DataFrame, model_name: str) -> pd.DataFrame:
+    """Project selected outer-fold rows to the comparison canonical schema.
+
+    Stamps ``model_name``, fills the PI columns with NaN (the eval DB stores
+    only the median), and deduplicates on (sector, target_date, horizon).
+    Returns an empty frame (with the canonical columns) when ``selected`` is empty.
+    """
+    out = pd.DataFrame({
+        "model_name":  model_name,
+        "sector_code": selected["sector_code"].astype(str),
+        "origin_date": pd.to_datetime(selected["origin_date"]),
+        "target_date": pd.to_datetime(selected["target_date"]),
+        "horizon":     selected["horizon"].astype(int),
+        "y_true":      selected["y_true"].astype(float),
+        "y_pred":      selected["y_pred"].astype(float),
+        "y_lower_80":  np.nan,
+        "y_upper_80":  np.nan,
+        "y_lower_95":  np.nan,
+        "y_upper_95":  np.nan,
+    })
+    if out.empty:
+        return out
+    return (out.sort_values(["sector_code", "target_date", "horizon", "origin_date"])
+               .drop_duplicates(subset=["sector_code", "target_date", "horizon"], keep="last")
+               .reset_index(drop=True))
+
 
 def load_pipeline_honest(
     eval_db_path: "str | Path",
@@ -125,85 +296,9 @@ def load_pipeline_honest(
             f"variant_selection must be one of {_VALID_MODES}, got {variant_selection!r}"
         )
 
-    from sqlalchemy import create_engine, inspect as sa_inspect
-
-    eval_db_path = Path(eval_db_path)
-    if not eval_db_path.exists():
-        raise FileNotFoundError(f"Eval DB not found: {eval_db_path}")
-
-    engine = create_engine(f"sqlite:///{eval_db_path.as_posix()}")
-    insp   = sa_inspect(engine)
-    existing_tables = set(insp.get_table_names())
-
-    # ── Pick predictions table ────────────────────────────────────────────
-    if table is None:
-        table = next((t for t in _DEFAULT_TABLE_PRIORITY if t in existing_tables), None)
-        if table is None:
-            raise ValueError(
-                f"No predictions table found in {eval_db_path}. "
-                f"Expected one of {_DEFAULT_TABLE_PRIORITY}; available: {sorted(existing_tables)}"
-            )
-
-    # ── Inspect schema to choose the right column names ───────────────────
-    cols = {c["name"] for c in insp.get_columns(table)}
-
-    # Date and horizon columns may be named differently across schemas
-    if "origin_date" in cols:
-        origin_col = "origin_date"
-    elif "fold_origin_date" in cols:
-        origin_col = "fold_origin_date"
-    else:
-        raise ValueError(
-            f"Table {table} missing an origin-date column (origin_date / fold_origin_date)"
-        )
-
-    if "horizon" in cols:
-        horizon_col = "horizon"
-    elif "horizon_step" in cols:
-        horizon_col = "horizon_step"
-    else:
-        raise ValueError(f"Table {table} missing a horizon column (horizon / horizon_step)")
-
-    has_fold_set = "fold_set" in cols
-    has_run_id   = "run_id" in cols
-    required     = {"sector_code", "model_name", "y_true", "y_pred", "target_date"}
-    missing      = required - cols
-    if missing:
-        raise ValueError(
-            f"Table {table} missing required columns: {missing}.  Available: {sorted(cols)}"
-        )
-
-    # ── Build SQL select ──────────────────────────────────────────────────
-    select_cols = [
-        "sector_code", "model_name", "target_date",
-        f'{origin_col} AS origin_date',
-        f'{horizon_col} AS horizon',
-        "y_true", "y_pred",
-    ]
-    if has_fold_set:
-        select_cols.append("fold_set")
-    if has_run_id:
-        select_cols.append("run_id")
-
-    sql = f'SELECT {", ".join(select_cols)} FROM "{table}"'
-    df  = pd.read_sql(sql, engine)
-    if df.empty:
-        raise ValueError(f"Table {table} is empty.")
-
-    # ── Apply run_filter if provided ──────────────────────────────────────
-    if run_filter:
-        for k, v in run_filter.items():
-            if k not in df.columns:
-                raise ValueError(f"run_filter key '{k}' not in {table} columns")
-            df = df[df[k] == v]
-        if df.empty:
-            raise ValueError(f"run_filter {run_filter} returned 0 rows")
-
-    df = df.copy()
-    df["sector_code"] = df["sector_code"].astype(str)
-    df["model_name"]  = df["model_name"].astype(str)
-    df["target_date"] = pd.to_datetime(df["target_date"])
-    df["origin_date"] = pd.to_datetime(df["origin_date"])
+    df, _meta = _load_predictions_df(eval_db_path, table=table, run_filter=run_filter)
+    has_run_id   = _meta["has_run_id"]
+    variant_keys = _meta["variant_keys"]
 
     # ── Filter baseline rows (CRITICAL) ───────────────────────────────────
     if exclude_baseline:
@@ -216,37 +311,6 @@ def load_pipeline_honest(
         df = df[~baseline_mask].copy()
         if df.empty:
             raise ValueError("After excluding baselines, no Pipeline rows remain.")
-
-    # ── Handle absent fold_set (legacy data) ─────────────────────────────
-    if not has_fold_set:
-        warnings.warn(
-            "Predictions table has no 'fold_set' column. Falling back to "
-            "treating every row as 'outer' — variant selection cannot use "
-            "inner folds and will be test-set biased. Re-run run_overnight.py "
-            "with the updated ml_5_model_evaluation.py to enable honest CV.",
-            stacklevel=2,
-        )
-        df["fold_set"] = "outer"
-    else:
-        df["fold_set"] = df["fold_set"].astype(str)
-
-    # ── Variant identifier construction ──────────────────────────────────
-    # WITHIN A SECTOR: variants are uniquely identified by (model_name, run_id).
-    # ACROSS THE FULL TABLE: a variant's predictions are pinned by
-    # (sector_code, model_name, run_id) — the user's specification.
-    if has_run_id:
-        df["run_id"] = df["run_id"].astype(str)
-        variant_keys = ["model_name", "run_id"]
-    else:
-        warnings.warn(
-            "Predictions table has no 'run_id' column. Variants will be "
-            "identified by model_name only — preset-level variation will be "
-            "collapsed together. Re-run pipeline to capture run_id.",
-            stacklevel=2,
-        )
-        variant_keys = ["model_name"]
-
-    df["_ae"] = (df["y_pred"] - df["y_true"]).abs()
 
     inner_df = df[df["fold_set"] == "inner"]
     outer_df = df[df["fold_set"] == "outer"]
@@ -274,36 +338,7 @@ def load_pipeline_honest(
             "more data per sector."
         )
 
-    canonical_out = pd.DataFrame({
-        "model_name":  "Pipeline",
-        "sector_code": canonical["sector_code"].astype(str),
-        "origin_date": pd.to_datetime(canonical["origin_date"]),
-        "target_date": pd.to_datetime(canonical["target_date"]),
-        "horizon":     canonical["horizon"].astype(int),
-        "y_true":      canonical["y_true"].astype(float),
-        "y_pred":      canonical["y_pred"].astype(float),
-        "y_lower_80":  np.nan,
-        "y_upper_80":  np.nan,
-        "y_lower_95":  np.nan,
-        "y_upper_95":  np.nan,
-    })
-
-    # Dedup safety net on (sector, target, horizon) — should be a no-op with
-    # the new variant identifier, but warns if duplicates slipped through.
-    pre_dedup = len(canonical_out)
-    canonical_out = (canonical_out.sort_values(
-                        ["sector_code", "target_date", "horizon", "origin_date"])
-                                  .drop_duplicates(
-                        subset=["sector_code", "target_date", "horizon"],
-                        keep="last")
-                                  .reset_index(drop=True))
-    if len(canonical_out) < pre_dedup:
-        warnings.warn(
-            f"Dedup removed {pre_dedup - len(canonical_out)} duplicate "
-            f"(sector, target, horizon) rows. This shouldn't happen with the "
-            f"(model_name, run_id) variant identifier — investigate.",
-            stacklevel=2,
-        )
+    canonical_out = _to_canonical(canonical, "Pipeline")
 
     return canonical_out, winners_table
 
@@ -328,8 +363,9 @@ def _select_per_sector_honest(
         warnings.warn(
             "No inner-fold rows found. Variant selection falls back to "
             "outer-fold MAE (biased — equivalent to per_sector_legacy). "
-            "To enable honest selection, re-run run_overnight.py with the "
-            "updated ml_5_model_evaluation.py.",
+            "To enable honest selection, re-run the sector sweep "
+            "(main.py <table> <model> --all-sectors) with the updated "
+            "ml_5_model_evaluation.py.",
             stacklevel=3,
         )
         return _select_per_sector_legacy(df, outer_df, variant_keys, has_run_id)
@@ -488,6 +524,94 @@ def _select_per_sector_legacy(
     winners_table["n_inner_predictions"] = 0  # n/a in legacy mode
     winners_table["n_outer_predictions"] = winners_table.pop("n_predictions")
     return canonical, winners_table
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Per-family loader for the cross-method comparison (run_comparison)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def load_families_from_eval_db(
+    eval_db_path: "str | Path",
+    *,
+    table: Optional[str] = None,
+    variant_selection: str = "per_sector_honest",
+    pipeline_families: tuple = _PIPELINE_FAMILIES,
+) -> Tuple[list, pd.DataFrame, dict]:
+    """Load one canonical-schema DataFrame per model FAMILY from the eval DB.
+
+    A "family" is the model_name with its trailing ``_<sector>`` stripped.
+    Within each family, honest per-sector variant selection (default) picks the
+    best ``(model_name, run_id)`` per sector by INNER-fold MAE and reports the
+    OUTER-fold rows — the same nested-CV discipline as ``load_pipeline_honest``,
+    applied per family so families stay distinct for the cross-method comparison.
+
+    The reducer families in ``pipeline_families`` collapse into a single
+    ``"Pipeline"`` competitor (best reducer variant per sector).  The stat
+    families map to their ``m_evaluation`` operational-table display names.  The
+    baseline (``SectorQuarterRollingMean``) is returned separately for skill scores.
+
+    Returns
+    -------
+    family_dfs : list[pd.DataFrame]
+        One canonical-schema DataFrame per family (``model_name`` = display
+        name), ready for ``m_evaluation.compare_all_models``.  Families that
+        produce no outer-fold rows are skipped.
+    baseline_df : pd.DataFrame
+        Canonical baseline rows (``model_name="baseline"``); empty if no baseline.
+    winners_by_family : dict
+        family display name → winners_table from the selector.
+    """
+    if variant_selection not in _VALID_MODES:
+        raise ValueError(
+            f"variant_selection must be one of {_VALID_MODES}, got {variant_selection!r}"
+        )
+
+    df, meta = _load_predictions_df(eval_db_path, table=table)
+    has_run_id   = meta["has_run_id"]
+    variant_keys = meta["variant_keys"]
+    df["_family"] = df["model_name"].str.rsplit("_", n=1).str[0]
+
+    def _select(sub: pd.DataFrame):
+        inner = sub[sub["fold_set"] == "inner"]
+        outer = sub[sub["fold_set"] == "outer"]
+        if variant_selection == "per_sector_honest":
+            return _select_per_sector_honest(sub, inner, outer, variant_keys, has_run_id)
+        if variant_selection == "global":
+            return _select_global(sub, inner, outer, variant_keys, has_run_id)
+        return _select_per_sector_legacy(sub, outer, variant_keys, has_run_id)
+
+    family_dfs: list = []
+    winners_by_family: dict = {}
+
+    # ── Baseline (kept separate, for skill scores) ────────────────────────
+    base_rows = df[df["_family"] == _BASELINE_PREFIX]
+    if not base_rows.empty:
+        base_sel, _ = _select(base_rows)
+        baseline_df = _to_canonical(base_sel, "baseline")
+    else:
+        baseline_df = _to_canonical(base_rows, "baseline")  # empty canonical frame
+
+    # ── Pipeline reducers collapsed into one competitor ───────────────────
+    pipe_rows = df[df["_family"].isin(pipeline_families)]
+    if not pipe_rows.empty:
+        pipe_sel, pipe_winners = _select(pipe_rows)
+        pipe_canon = _to_canonical(pipe_sel, "Pipeline")
+        if not pipe_canon.empty:
+            family_dfs.append(pipe_canon)
+            winners_by_family["Pipeline"] = pipe_winners
+
+    # ── Every other (stat / unknown) family on its own ────────────────────
+    handled = set(pipeline_families) | {_BASELINE_PREFIX}
+    for fam in sorted(f for f in df["_family"].unique() if f not in handled):
+        sub = df[df["_family"] == fam]
+        display = _FAMILY_DISPLAY.get(fam, fam)
+        sel, winners = _select(sub)
+        canon = _to_canonical(sel, display)
+        if not canon.empty:
+            family_dfs.append(canon)
+            winners_by_family[display] = winners
+
+    return family_dfs, baseline_df, winners_by_family
 
 
 if __name__ == "__main__":

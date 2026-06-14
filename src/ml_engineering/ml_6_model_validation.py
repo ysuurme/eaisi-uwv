@@ -1,15 +1,32 @@
 """
-Step 6 — ML Model Validation.
+Step 6 — ML Model Validation (MASE-gated champion/challenger gate).
 
-Validates model quality against thresholds and manages MLflow registration.
-Combines the quality gate decision with model governance:
-- Tags every run with passed_gate (so filtering — not deletion — is the
-  UI filter strategy; failed runs remain queryable for diagnostics)
-- Persists the gate result to the ModelEvaluationRecord SQL row
-- Checks metrics against the acceptance threshold
-- Registers the model in the MLflow Model Registry
-- Promotes to an alias (@prod, @staging)
+Decides promotion to the MLflow Model Registry and manages governance.
+Gate policy (ADR-001 / ADR-002):
+
+- There is ONE registered model per sector; its ``@prod`` alias is that
+  sector's champion.
+- **MASE is THE comparison metric** — Mean Absolute Scaled Error, the
+  outer-fold MAE scaled by the in-sample seasonal-naive (m=4) MAE (computed in
+  Step 5).  It is scale-free and comparable across sectors; **lower is better**
+  and **MASE < 1 beats the seasonal naive**.  The champion is the model with the
+  **lowest MASE** per sector: a challenger is promoted iff its MASE is finite and
+  strictly lower than the incumbent champion's MASE (or it seeds when none
+  exists).
+- **Optional floor** ``max_mase``: when set (e.g. 1.0), a challenger must also
+  clear MASE < ``max_mase`` to be promoted — "only promote models that beat the
+  seasonal naive".  ``None`` (default) disables the floor (pure lowest-MASE).
+- R² gates only when an optional ``r2_floor`` is supplied (disabled by default).
+- Losers are NOT registered.  The run is tagged ``passed_gate=false`` and its
+  ``ModelEvaluationRecord`` row is updated, so failed runs stay diagnosable.
+- The promoted version carries the full interpretable metric set —
+  ``mase`` (THE cross-sector comparison metric, dimensionless; <1 beats the
+  naive), ``mae`` (the primary stakeholder metric, in percentage points — same
+  units as the target), ``mape`` (the foundational percentage-error metric) —
+  plus ``r2`` / ``model_family`` tags, so the registry self-describes each
+  champion.
 """
+import math
 import mlflow
 from mlflow.tracking import MlflowClient
 from typing import Dict, Optional
@@ -19,9 +36,11 @@ from sqlalchemy.orm import Session
 from src.ml_engineering.model_configs import ModelEvaluationRecord
 from src.utils.m_log import f_log
 
+_PROD_ALIAS = "prod"
+
 
 class ModelValidator:
-    """Validates model quality and manages MLflow model lifecycle."""
+    """Champion/challenger gate + MLflow model lifecycle management."""
 
     def __init__(self):
         self.client = MlflowClient()
@@ -29,92 +48,225 @@ class ModelValidator:
     def validate_and_register(
         self,
         run_id: str,
-        model_name: str,
+        registered_model_name: str,
         metrics: Dict[str, float],
-        threshold_r2: float = 0.5,
+        model_family: str,
+        model_type: str = "",
+        feature_groups: str = "",
+        sector_code: str = "",
+        r2_floor: Optional[float] = None,
+        max_mase: Optional[float] = None,
         tags: Optional[dict] = None,
         description: str = "",
         session: Optional[Session] = None,
     ) -> bool:
-        """Checks quality gate. If passed, registers and promotes the model.
+        """Run the MASE champion/challenger gate; register + promote if it wins.
 
-        Side effects regardless of pass/fail (so failed runs remain
-        diagnosable rather than deleted):
-        - Sets MLflow tag ``passed_gate=true|false`` on the run.
-        - When a ``session`` is supplied, updates the corresponding
-          ``ModelEvaluationRecord.passed_gate`` SQL field.
+        Args:
+            run_id: MLflow run that produced the candidate.
+            registered_model_name: Sector-keyed registry name (ADR-002).
+            metrics: Must contain ``mase`` (THE comparison metric) + ``mae``
+                (stakeholder metric, percentage points) + ``mape`` / ``r2``
+                (outer-fold honest values).
+            model_family: Estimator family (e.g. ``RandomForest_Reduced``);
+                stored as a version tag so the family survives the sector-only
+                registry name.
+            sector_code: Sector label, for logging.
+            r2_floor: Optional secondary R² floor.  None disables it (default).
+            max_mase: Optional MASE ceiling — a challenger must clear
+                ``MASE < max_mase`` (e.g. 1.0 = must beat the seasonal naive).
+                None (default) disables it: the champion is simply the lowest MASE.
+            tags: Extra version tags to attach on promotion.
+            description: Optional version description; a MASE/MAPE/family summary
+                is generated when omitted.
+            session: When supplied, the matching ``ModelEvaluationRecord``'s
+                ``passed_gate`` field is updated.
 
         Returns:
-            True if the model passed the gate and was registered, False otherwise.
+            True if the candidate was promoted to ``@prod``, else False.
         """
-        passed = metrics["r2"] >= threshold_r2
+        candidate_mase = metrics.get("mase", float("nan"))
+        candidate_mape = metrics.get("mape", float("nan"))
+        candidate_mae = metrics.get("mae", float("nan"))
+        candidate_r2 = metrics.get("r2", float("nan"))
+        champion_mase = self._champion_mase(registered_model_name)
 
-        # ── MLflow tag (always, regardless of pass/fail) ──────────────────
-        # Use MlflowClient because the Step 4 mlflow.start_run() context has
-        # already closed by the time Step 6 runs.  This keeps failed runs in
-        # the database, filterable in the UI via tags.passed_gate = "true".
-        try:
-            self.client.set_tag(run_id, "passed_gate", "true" if passed else "false")
-        except Exception as exc:
-            f_log(f"MLflow set_tag(passed_gate) failed for {run_id}: {exc}", c_type="warning")
+        promote = self._is_winner(
+            candidate_mase, candidate_r2, champion_mase, r2_floor, max_mase=max_mase,
+        )
 
-        # ── SQL update (when session is provided) ─────────────────────────
-        # Overwrites the placeholder 0 written by Step 5.  Failures here are
-        # non-fatal — the MLflow tag remains the authoritative gate marker.
-        if session is not None:
-            try:
-                rec = session.get(ModelEvaluationRecord, run_id)
-                if rec is not None:
-                    rec.passed_gate = 1 if passed else 0
-                    session.commit()
-                else:
-                    f_log(
-                        f"No ModelEvaluationRecord for run_id={run_id} — "
-                        f"passed_gate SQL update skipped.",
-                        c_type="warning",
-                    )
-            except Exception as exc:
-                session.rollback()
-                f_log(f"Failed to update passed_gate SQL field: {exc}", c_type="warning")
+        # Tag the run + persist the gate result regardless of outcome, so failed
+        # runs remain filterable in the UI and queryable in SQL.
+        self._safe_set_run_tag(run_id, "passed_gate", "true" if promote else "false")
+        self._update_sql_gate(session, run_id, promote)
 
-        if not passed:
+        mase_str = "n/a" if not math.isfinite(candidate_mase) else f"{candidate_mase:.4f}"
+        if not promote:
+            champ = "none" if champion_mase is None else f"{champion_mase:.4f}"
+            floored = (
+                max_mase is not None and math.isfinite(candidate_mase)
+                and candidate_mase >= max_mase
+            )
+            reason = (
+                f"MASE {mase_str} ≥ floor {max_mase} (does not beat the bar)"
+                if floored else f"MASE={mase_str} vs champion {champ}"
+            )
             f_log(
-                f"Gate FAIL | R2: {metrics['r2']:.4f} < threshold {threshold_r2}",
+                f"Gate FAIL | {sector_code or registered_model_name} | {reason}",
                 c_type="gate_fail",
             )
             return False
 
-        f_log(f"Gate PASS | R2: {metrics['r2']:.4f} >= threshold {threshold_r2}", c_type="success")
-
-        version = self._register_model(run_id, model_name, tags, description)
-        self._promote_to_alias(model_name, version, alias="prod")
-
-        f_log(f"Model registered | {model_name} v{version} -> @prod", c_type="register")
+        version = self._register_and_promote(
+            run_id, registered_model_name, model_family, model_type, feature_groups,
+            candidate_mase, candidate_mape, candidate_mae, candidate_r2, tags, description,
+        )
+        f_log(
+            f"Promoted | {registered_model_name} v{version} -> @{_PROD_ALIAS} | "
+            f"MASE={mase_str} MAE={candidate_mae:.4f}pp MAPE={candidate_mape:.2%} "
+            f"R²={candidate_r2:.4f} family={model_family}",
+            c_type="register",
+        )
         return True
 
-    def _register_model(
-        self, run_id: str, model_name: str,
-        tags: Optional[dict], description: str,
+    # ── gate decision ────────────────────────────────────────────────────
+    @staticmethod
+    def _is_winner(
+        candidate_mase: float,
+        candidate_r2: float,
+        champion_mase: Optional[float],
+        r2_floor: Optional[float],
+        *,
+        max_mase: Optional[float] = None,
+    ) -> bool:
+        """Pure decision: finite MASE, optional R² floor, optional MASE ceiling,
+        then beat the incumbent champion's MASE (lower is better).
+
+        ``max_mase`` (when set) rejects a challenger that does not clear
+        ``MASE < max_mase`` (e.g. 1.0 = must beat the seasonal naive).
+        """
+        if candidate_mase is None or not math.isfinite(candidate_mase):
+            return False
+        if r2_floor is not None and (
+            candidate_r2 is None
+            or not math.isfinite(candidate_r2)
+            or candidate_r2 < r2_floor
+        ):
+            return False
+        if max_mase is not None and candidate_mase >= max_mase:
+            return False
+        if champion_mase is None:
+            return True  # seed: no incumbent to beat
+        return candidate_mase < champion_mase
+
+    def _champion_mase(self, registered_model_name: str) -> Optional[float]:
+        """Read the incumbent ``@prod`` champion's MASE tag, or None if absent."""
+        try:
+            mv = self.client.get_model_version_by_alias(registered_model_name, _PROD_ALIAS)
+        except Exception:
+            return None  # no registered model / no @prod alias yet
+        raw = (getattr(mv, "tags", None) or {}).get("mase")
+        try:
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    # ── registration / promotion ──────────────────────────────────────────
+    def _register_and_promote(
+        self,
+        run_id: str,
+        registered_model_name: str,
+        model_family: str,
+        model_type: str,
+        feature_groups: str,
+        mase: float,
+        mape: float,
+        mae: float,
+        r2: float,
+        tags: Optional[dict],
+        description: str,
     ) -> str:
-        """Registers a model version from a completed run."""
-        model_uri = f"runs:/{run_id}/model"
-        model_version = mlflow.register_model(model_uri, model_name)
+        """Register the run's model, stamp provenance tags, move ``@prod``.
 
-        if tags:
-            for key, val in tags.items():
-                self.client.set_model_version_tag(
-                    name=model_name, version=model_version.version, key=key, value=val,
-                )
-        if description:
+        The version is made fully self-describing — model family, the underlying
+        algorithm (model_type), the config feature groups, and the metric set:
+        ``mase`` (THE cross-sector comparison metric), ``mae`` (the primary
+        stakeholder metric, in percentage points — same units as the target),
+        and ``mape`` (the foundational percentage-error metric) — so the registry
+        is the single source of truth for downstream views.
+        """
+        model_version = mlflow.register_model(f"runs:/{run_id}/model", registered_model_name)
+        version = model_version.version
+
+        # Store MASE/MAE/MAPE/R² at full precision (repr round-trips exactly) so the
+        # champion lookup compares the same value that produced the tag.
+        # Rounding here would let an identical re-run falsely "beat" itself.
+        version_tags = {
+            "mase": repr(float(mase)),
+            "mae": repr(float(mae)),
+            "mape": repr(float(mape)),
+            "r2": repr(float(r2)),
+            "model_family": model_family,
+            "model_type": model_type,
+            "feature_groups": feature_groups,
+            **(tags or {}),
+        }
+        for key, val in version_tags.items():
+            self._safe_set_version_tag(registered_model_name, version, key, val)
+
+        summary = description or (
+            f"MASE={mase:.4f} MAE={mae:.4f}pp MAPE={mape:.2%} R²={r2:.4f} family={model_family}"
+        )
+        try:
             self.client.update_model_version(
-                name=model_name, version=model_version.version, description=description,
+                name=registered_model_name, version=version, description=summary,
             )
-        return model_version.version
+        except Exception as exc:
+            f_log(f"update_model_version failed for {registered_model_name} v{version}: {exc}",
+                  c_type="warning")
 
-    def _promote_to_alias(self, model_name: str, version: str, alias: str = "prod") -> None:
-        """Promotes a specific model version to an alias (e.g., @prod)."""
-        self.client.set_registered_model_alias(name=model_name, alias=alias, version=version)
+        self.client.set_registered_model_alias(
+            name=registered_model_name, alias=_PROD_ALIAS, version=version,
+        )
+        return version
 
-    def get_model_uri(self, model_name: str, alias: str = "prod") -> str:
-        """Returns the URI for loading a registered model by alias."""
-        return f"models:/{model_name}/@{alias}"
+    def get_model_uri(self, registered_model_name: str, alias: str = _PROD_ALIAS) -> str:
+        """Returns the URI for loading a registered model by alias.
+
+        MLflow's alias URI form is ``models:/<name>@<alias>`` (no slash before
+        ``@``).  An earlier draft emitted ``models:/<name>/@<alias>``, which
+        MLflow rejects; this helper was never called (Step 7 deliberately
+        rebuilds + refits from lineage rather than loading the pyfunc artifact),
+        so the bug stayed latent — fixed here so the helper is correct for any
+        future loader.
+        """
+        return f"models:/{registered_model_name}@{alias}"
+
+    # ── side-effect helpers (best-effort; never abort the gate) ────────────
+    def _safe_set_run_tag(self, run_id: str, key: str, value: str) -> None:
+        try:
+            self.client.set_tag(run_id, key, value)
+        except Exception as exc:
+            f_log(f"MLflow set_tag({key}) failed for {run_id}: {exc}", c_type="warning")
+
+    def _safe_set_version_tag(self, name: str, version: str, key: str, value: str) -> None:
+        try:
+            self.client.set_model_version_tag(name=name, version=version, key=key, value=value)
+        except Exception as exc:
+            f_log(f"set_model_version_tag({key}) failed for {name} v{version}: {exc}",
+                  c_type="warning")
+
+    def _update_sql_gate(self, session: Optional[Session], run_id: str, promote: bool) -> None:
+        if session is None:
+            return
+        try:
+            rec = session.get(ModelEvaluationRecord, run_id)
+            if rec is not None:
+                rec.passed_gate = 1 if promote else 0
+                session.commit()
+            else:
+                f_log(f"No ModelEvaluationRecord for run_id={run_id} — "
+                      f"passed_gate SQL update skipped.", c_type="warning")
+        except Exception as exc:
+            session.rollback()
+            f_log(f"Failed to update passed_gate SQL field: {exc}", c_type="warning")

@@ -1,0 +1,10 @@
+=== Alignment report ===
+  intersection key: ('sector_code', 'target_date', 'horizon')
+  models aligned:   2
+  aligned rows:     24
+  aligned sectors:  1
+  aligned horizons: [np.int64(1), np.int64(2), np.int64(3), np.int64(4)]
+
+  per-model coverage (native → aligned):
+    Pipeline                      :     12 →     12  (100.0% retained)
+    AutoETS_Stat                  :     12 →     12  (100.0% retained)

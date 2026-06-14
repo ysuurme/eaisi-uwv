@@ -13,6 +13,7 @@ Two execution paths based on estimator type:
                                 logged via mlflow.pyfunc so the MLflow registry can
                                 resolve runs:/{run_id}/model in Step 6.
 """
+import hashlib
 import json
 import os
 import pickle
@@ -29,6 +30,7 @@ from sktime.performance_metrics.forecasting import MeanSquaredError
 from sqlalchemy.orm import Session
 
 from src.ml_engineering.model_configs import (
+    _FEATURE_CATALOG_FILE,
     ModelExperiment,
     ModelTuningRecord,
     SectorQuarterRollingMean,
@@ -36,11 +38,39 @@ from src.ml_engineering.model_configs import (
 from src.utils.m_log import f_log
 
 
+#: Training forecast horizon — the 4 quarters the project forecasts ahead.
+#: Passed to ``.fit`` (not just CV) so ``strategy="direct"`` reducers, which
+#: require ``fh`` at fit time (``requires-fh-in-fit=True``), train correctly.
+#: Harmless for recursive/stat forecasters, which accept and store it.
+_FH = [1, 2, 3, 4]
+
+
 # ---------------------------------------------------------------------------
 # pyfunc wrapper — bridges MLflow's predict(model_input) with sktime's
 # predict(fh, X) API, enabling sktime models to be registered in the registry.
 # Defined at module level so mlflow.pyfunc can serialize it correctly.
 # ---------------------------------------------------------------------------
+
+def _base_estimator_name(estimator: Any) -> str:
+    """Unwrap a model to its underlying algorithm name for clear MLflow metadata.
+
+    sktime's ``make_reduction`` wraps an sklearn estimator (often a ``Pipeline``)
+    inside a forecaster whose class is the opaque ``RecursiveTabular
+    RegressionForecaster``.  This peels back to the actual algorithm — e.g.
+    ``LinearRegression``, ``RandomForestRegressor`` — so the model *type* is
+    legible in the MLflow UI.  Falls back to the estimator's own class name
+    (e.g. ``SectorQuarterRollingMean`` for the baseline).
+    """
+    inner = getattr(estimator, "estimator", None)  # sktime reducer → wrapped sklearn est
+    if inner is None:
+        # QuarterlyPeriodForecaster (and similar adapters) → wrapped forecaster
+        inner = getattr(estimator, "forecaster", None)
+    target = inner if inner is not None else estimator
+    steps = getattr(target, "steps", None)          # sklearn Pipeline → final step
+    if steps:
+        return type(steps[-1][1]).__name__
+    return type(target).__name__
+
 
 class _SktimePyfuncWrapper(mlflow.pyfunc.PythonModel):
     """Minimal pyfunc wrapper for sktime forecasters.
@@ -94,10 +124,48 @@ class ModelTrainer:
                 "forecast_horizon": "4Q",
                 "preset": os.environ.get("PRESET_NAME", "unknown"),
             })
+            self._log_lineage(experiment, x_train, lineage)
             fitted_model = self._fit_or_tune(experiment, x_train, y_train, run_id)
             self._log_model_artifact(fitted_model, x_train, y_train)
             f_log(f"Training complete | Run: {run_name}", c_type="success")
             return fitted_model, run_id
+
+    @staticmethod
+    def _log_lineage(
+        experiment: ModelExperiment,
+        x_train: pd.DataFrame,
+        lineage: Dict[str, Any],
+    ) -> None:
+        """Logs feature + config provenance so any run is reproducible.
+
+        Captures the named feature groups, the feature-catalog file, the
+        catalog key, the estimator class, and a stable hash of the resolved feature columns
+        (also dumped as a ``features.json`` artifact).  Together with the
+        best-params logged after tuning, this makes two runs of the same
+        estimator distinguishable purely from MLflow metadata.
+        """
+        numeric_cols = sorted(x_train.select_dtypes(include="number").columns.tolist())
+        feature_set_hash = hashlib.sha1(",".join(numeric_cols).encode()).hexdigest()[:12]
+        groups = experiment.feature_groups
+        base_estimator = _base_estimator_name(experiment.estimator)
+        mlflow.log_params({
+            "experiment_key": lineage.get("experiment_key", "unknown"),
+            "model_name": experiment.name,
+            "feature_groups": json.dumps(groups) if groups is not None else "discovery",
+            "feature_catalog": _FEATURE_CATALOG_FILE,
+            "estimator_class": type(experiment.estimator).__name__,
+            "base_estimator_class": base_estimator,
+        })
+        # Clear, filterable model identity in the MLflow runs table.
+        mlflow.set_tags({
+            "feature_set_hash": feature_set_hash,
+            "model_family": experiment.name,
+            "model_type": base_estimator,
+        })
+        mlflow.log_dict(
+            {"resolved_features": numeric_cols, "feature_set_hash": feature_set_hash},
+            "features.json",
+        )
 
     def _fit_or_tune(
         self,
@@ -119,22 +187,29 @@ class ModelTrainer:
         X = X_numeric if (experiment.feature_groups is not None and not X_numeric.empty) else None
 
         if not experiment.param_grid:
-            estimator.fit(y=y_train, X=X)
+            # fh passed at fit so direct-strategy reducers train (no-op for others).
+            estimator.fit(y=y_train, X=X, fh=_FH)
             return estimator
 
         f_log(f"Tuning {experiment.name} with ForecastingGridSearchCV...", c_type="process")
         # fh=[1,2,3,4]: evaluate all 4 quarters of the forecast horizon in each fold.
         # step_length=4: advance one full year per fold (quarterly seasonal alignment).
         # initial_window=40: require 10 years of data before the first CV fold.
-        cv = ExpandingWindowSplitter(initial_window=40, step_length=4, fh=[1, 2, 3, 4])
+        cv = ExpandingWindowSplitter(initial_window=40, step_length=4, fh=_FH)
         grid = ForecastingGridSearchCV(
             forecaster=estimator,
             param_grid=experiment.param_grid,
             cv=cv,
             scoring=MeanSquaredError(square_root=False),
         )
-        grid.fit(y=y_train, X=X)
+        # fh at fit so the final refit on full data is direct-strategy-ready.
+        grid.fit(y=y_train, X=X, fh=_FH)
         self._store_tuning_results(run_id, grid.cv_results_)
+        # Reproducibility: the chosen hyperparameters and the full grid searched.
+        mlflow.log_params({
+            "best_params": json.dumps(grid.best_params_, default=str),
+            "param_grid": json.dumps(experiment.param_grid, default=str),
+        })
         return grid.best_forecaster_
 
     def _store_tuning_results(self, run_id: str, cv_results: dict) -> None:

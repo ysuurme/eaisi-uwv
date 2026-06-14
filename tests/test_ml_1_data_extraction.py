@@ -143,6 +143,32 @@ class TestDataExtraction(unittest.TestCase):
                 sbi_filter_col="BedrijfskenmerkenSBI2008_NONEXISTENT",
             )
 
+    def test_derive_feature_columns_excludes_structural_ohe_and_sector(self):
+        """derive_feature_columns is the single source of truth for feature columns:
+        target, structural context, OHE indicators, and the synthetic sector
+        label are excluded; everything else (incl. y_* yearly columns — frequency
+        filtering happens at the registry layer, not here) is a feature."""
+        df = _base_df(
+            feat1=[10, 20, 30, 40, 50],
+            y_feat_yearly=[1, 1, 1, 1, 1],
+            silver_id=range(_N),
+            trend_index=range(_N),
+            covid_period=[0] * _N,
+            sector=["T001081"] * _N,
+        )
+
+        cols = DataExtractor.derive_feature_columns(df, target_column="target")
+
+        self.assertIn("feat1", cols)
+        self.assertIn("y_feat_yearly", cols)
+        self.assertNotIn("target", cols)
+        self.assertNotIn("period_enddate", cols)
+        self.assertNotIn("trend_index", cols)
+        self.assertNotIn("covid_period", cols)
+        self.assertNotIn("silver_id", cols)
+        self.assertNotIn("sector", cols)
+        self.assertNotIn("BedrijfskenmerkenSBI2008_T001081", cols)
+
 
 if __name__ == "__main__":
     unittest.main()

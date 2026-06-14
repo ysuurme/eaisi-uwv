@@ -3,22 +3,54 @@ Main Entry Point for EAISI UWV ML Pipeline.
 
 Usage
 -----
+Data engineering (raw → bronze → silver → gold):
+    python main.py --refresh-data
+
+Feature selection (gold → statistical funnel → feature_catalog.json):
+    python main.py --select-features
+
+Forward forecast (every @prod champion → model_forecasts + figures):
+    python main.py --forecast
+
+Champion-based report (refresh read-models + regenerate all figures/CSVs + summary):
+    python main.py --report
+
+Full sweep (every model family × all sectors → eval DB; the "clean run"):
+    python main.py --full-sweep
+
+Cross-method comparison (eval DB → reports/comparison/ scorecard + decision matrix):
+    python main.py --compare
+
 All-industry mode (default):
     python main.py <gold_table> <model_key> [sbi_filter_col] [group1,group2,...]
 
 Sector-specific mode:
-    python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
+    python main.py master_data_ml_preprocessed ridge BedrijfskenmerkenSBI2008_301000
+
+Sector sweep (all SBI sectors, one run each):
+    python main.py master_data_ml_preprocessed baseline --all-sectors
+
+Model keys (ModelConfiguration catalog): baseline, autoets, stl_ets, chronos_bolt,
+ridge, random_forest, ridge_deseason.
 
 Examples:
     python main.py master_data_ml_preprocessed baseline
-    python main.py master_data_ml_preprocessed linear BedrijfskenmerkenSBI2008_301000
-    python main.py master_data_ml_preprocessed random_forest - compensation,labor_volume
+    python main.py master_data_ml_preprocessed autoets BedrijfskenmerkenSBI2008_301000
+    python main.py master_data_ml_preprocessed random_forest - labor_structure,wages
     (use '-' as sbi_filter_col placeholder to skip it and specify feature groups)
 """
 import sys
 
 from src.config import START_MLFLOW_UI
-from src.ml_engineering.ml_orchestrator import run_pipeline, run_sector_sweep
+from src.ml_engineering.ml_orchestrator import (
+    run_comparison,
+    run_feature_selection,
+    run_forecast,
+    run_full_sweep,
+    run_pipeline,
+    run_report,
+    run_sector_sweep,
+)
 from src.utils.m_log import setup_logging, f_log
 from src.utils.m_mlflow_ui import ensure_mlflow_ui
 
@@ -51,8 +83,38 @@ def main() -> None:
         sys.argv.remove("--refresh-data")
         run_data_pipeline()
 
+    if "--select-features" in sys.argv:
+        sys.argv.remove("--select-features")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_feature_selection(gold_table=gold_table)
+        return
+
+    if "--forecast" in sys.argv:
+        sys.argv.remove("--forecast")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_forecast(gold_table=gold_table)
+        return
+
+    if "--report" in sys.argv:
+        sys.argv.remove("--report")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_report(gold_table=gold_table)
+        return
+
+    if "--full-sweep" in sys.argv:
+        sys.argv.remove("--full-sweep")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_full_sweep(gold_table=gold_table)
+        return
+
+    if "--compare" in sys.argv:
+        sys.argv.remove("--compare")
+        gold_table = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
+        run_comparison(gold_table=gold_table)
+        return
+
     gold_table    = sys.argv[1] if len(sys.argv) > 1 else "master_data_ml_preprocessed"
-    model_key     = sys.argv[2] if len(sys.argv) > 2 else "linear"
+    model_key     = sys.argv[2] if len(sys.argv) > 2 else "baseline"
     # arg 3: sbi_filter_col — use '-' as a placeholder to skip (means all-industry)
     sbi_raw       = sys.argv[3] if len(sys.argv) > 3 else None
     sbi_filter_col = sbi_raw if (sbi_raw and sbi_raw != "-") else None

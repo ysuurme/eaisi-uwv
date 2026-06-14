@@ -38,9 +38,12 @@ import pandas as pd
 
 # --- Configuration ---
 try:
-    from config import DIR_DATA_RAW
-except ImportError:
-    DIR_DATA_RAW = None
+    from src.config import DIR_DATA_RAW
+except ImportError:  # pragma: no cover - notebook contexts that add src/ to sys.path
+    try:
+        from config import DIR_DATA_RAW
+    except ImportError:
+        DIR_DATA_RAW = None
 
 # --- Logging ---
 logger = logging.getLogger(__name__)

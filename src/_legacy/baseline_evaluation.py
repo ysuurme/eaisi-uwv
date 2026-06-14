@@ -1,4 +1,9 @@
 """
+RETIRED (archived 2026-06) — orphaned/uncalled.  The in-pipeline
+``SectorQuarterRollingMean`` baseline (scored under the same walk-forward MASE as
+every model) plus ``python main.py --compare`` supersede this separate marimo
+``prediction_baseline_*`` logger.  Kept for reference only.
+
 Baseline Evaluation — MLflow Integration
 Reads pre-computed baseline predictions from the Gold DB and logs
 metrics to MLflow as a named reference run for model comparison.

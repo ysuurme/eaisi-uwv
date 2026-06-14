@@ -1142,6 +1142,8 @@ def save_preset_to_json(
     input_shape: tuple[int, int] | list[int],
     description: str = "",
     ungrouped_survivors: list[str] | None = None,
+    filename: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> Path:
     """Serialise a feature selection preset to a JSON file.
 
@@ -1166,6 +1168,12 @@ def save_preset_to_json(
         Human-readable description of the preset strategy.
     ungrouped_survivors : list[str], optional
         Survivors not assigned to any group.
+    filename : str, optional
+        Exact output filename (e.g. ``"feature_catalog.json"``).  Defaults to
+        ``preset_{preset_name}.json`` for backward compatibility.
+    extra_metadata : dict, optional
+        Additional top-level keys merged into the artifact (never overrides
+        the standard keys).
 
     Returns
     -------
@@ -1200,8 +1208,10 @@ def save_preset_to_json(
         "filter_chain": chain_summary,
         "feature_groups": feature_groups,
     }
+    for key, value in (extra_metadata or {}).items():
+        artifact.setdefault(key, value)
 
-    path = output_dir / f"preset_{preset_name}.json"
+    path = output_dir / (filename if filename else f"preset_{preset_name}.json")
     with open(path, "w") as f:
         json.dump(artifact, f, indent=2, default=str)
 
