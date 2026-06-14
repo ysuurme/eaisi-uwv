@@ -13,7 +13,7 @@ DIR_FEATURE_SELECTION = PROJECT_ROOT / "data" / "feature_selection"
 
 
 # --- Toggle Flags ---
-START_MLFLOW_UI = True # Set to True/False to auto-start MLflow UI in background
+START_MLFLOW_UI = False # Set to True/False to auto-start MLflow UI in background
 
 # --- Temporal Filter ---
 # Structural break: the WIA law (2003) caused a significant regime shift in
