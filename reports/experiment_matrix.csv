@@ -1,4 +1,8 @@
 model_family,all_survivors,discovery,structural_only
-AutoETS_Stat,,,0.8405240141422675
-RidgeDeseason_Reduced,1.8409088625103807,,
-SectorQuarterRollingMean,,2.4580712788259955,
+AutoETS_Stat,,,0.6774245381415317
+ChronosBolt_Stat,,,0.7269663210934815
+RandomForest_Reduced,1.066909705688617,,
+RidgeDeseason_Reduced,0.9477132689961995,,
+Ridge_Reduced,0.962444924893224,,
+STLETS_Stat,,,1.2849690525191328
+SectorQuarterRollingMean,,1.3958333333333333,
