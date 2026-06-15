@@ -1,7 +1,5 @@
 # EAISI UWV
 
-> **📐 Architecture & navigation:** start with **[CONTEXT.md](CONTEXT.md)** — bounded contexts, the **Module Map**, and an **Issue-Type → Files** index for finding the right file fast. Deeper architecture/standards live in [AGENTS.md](AGENTS.md); the working backlog in [ISSUES.md](ISSUES.md). *(AGENTS.md and ISSUES.md are local/gitignored.)*
-
 ## Table of Contents
 
 - [🚀 Quick Start](#quick-start)
