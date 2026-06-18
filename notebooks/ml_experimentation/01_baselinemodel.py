@@ -45,7 +45,7 @@ def _():
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
     from sqlalchemy import create_engine
-    from config import DIR_DB_SILVER, DIR_DATA_RAW
+    from src.config import DIR_DB_SILVER, DIR_DATA_RAW
     from src.utils.m_nb_results_to_gold_export import f_nb_results_to_gold_export, f_list_gold_tables
     from src.utils.m_query_database import f_query_database
     from src.utils.m_sbi_classifier import f_split_by_sbi

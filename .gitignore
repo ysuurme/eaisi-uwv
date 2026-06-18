@@ -27,6 +27,6 @@ wheels/
 .vscode
 eaisi-uwv.code-workspace
 pyrightconfig.json
-GEMINI.md
-TODO.md
+AGENTS.md
+ISSUES.md
 Taskfile.yml

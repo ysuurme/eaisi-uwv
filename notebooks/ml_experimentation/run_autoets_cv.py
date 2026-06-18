@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 """
-run_autoets_cv.py — Walk-forward CV with ETS across all SBI segments
-                     and COVID correction variants.
+run_autoets_cv.py — Walk-forward CV with AutoETS at horizon h=4.
 
-Tests 9 ETS model specifications (M-error only) × 6 correction variants
-(3 base + 3 winsorized). Model+correction selection uses inner folds
-(first 60%); unbiased error is reported on outer folds (last 40%).
+What changed vs the h=1 version
+-------------------------------
+- Each fold now produces FOUR predictions (h=1, h=2, h=3, h=4) instead of one.
+- The last three fold positions are dropped because they can't yield four
+  actual future quarters to evaluate against.
+- Config selection on inner folds uses the MEAN absolute error across all
+  four horizons.  This matches the deployment task: forecasting a year out.
+- Output schema gains `horizon` and `origin_date` columns — required by
+  evaluation_method.py to align this output with other model families.
 
-Also saves the full prediction matrix for all configs (not just the winner)
-to enable downstream DM tests, ensembling, and post-hoc analysis.
+How the index arithmetic works
+------------------------------
+For a series of length N with outer_start = M, a fold at origin position p:
+    training data    = ts.iloc[:p+1]            (indices 0..p inclusive)
+    origin_date      = ts.index[p]
+    target indices   = p+1, p+2, p+3, p+4
+    target_dates h=1..4 = ts.index[p+1..p+4]
+We need ts.index[p+4] to exist → latest viable origin is p = N - 4 - 1 = N - 5.
+So origin position p ranges from M to N-5 inclusive, giving N - M - 4 folds.
 
-Usage:
+Usage
+-----
     python run_autoets_cv.py                    # all segments
     python run_autoets_cv.py --dry-run          # config only
     python run_autoets_cv.py --segment T001081  # one segment
@@ -40,24 +53,28 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from config import DIR_DB_SILVER
-from src.utils.m_query_database import f_query_database
+from src.config import DIR_DB_GOLD, DIR_DB_SILVER
+from src.utils.m_gold_target_loader import (
+    load_target_series_from_gold,
+    load_target_series_from_silver,
+)
 
 # =============================================================================
 # SETTINGS
 # =============================================================================
-N_WORKERS   = 10
-OUTPUT_DIR  = Path("cv_output")
-covid_start = pd.Timestamp('2020-03-31')
-covid_end   = pd.Timestamp('2022-06-30')
+HORIZON       = 4               # forecast horizon (deployment-relevant)
+N_WORKERS     = 10
+OUTPUT_DIR    = Path("cv_output")
+covid_start   = pd.Timestamp('2020-03-31')
+covid_end     = pd.Timestamp('2022-06-30')
 MIN_TRAIN_FRAC = 0.45           # minimum training fraction of series length
 MIN_TRAIN_ABS  = 20             # absolute minimum training quarters
-INNER_FRAC  = 0.6               # fraction of folds for selection
-SEED        = 42                # reproducibility
+MIN_HISTORY    = 33             # SHARED with run_stl_ets_cv.py and run_chronos_cv.py
+                                # — ensures the three scripts process the same sectors
+INNER_FRAC    = 0.6             # fraction of folds for selection
+SEED          = 42
 
 # ETS specs: Multiplicative-error only (appropriate for positive rates)
-# Additive-error specs dropped: theoretically inappropriate for bounded
-# positive rates and empirically dominated in prior results.
 # Format: (label, model_str, damped)
 ETS_SPECS = [
     ("MNN",  "MNN", False), ("MAN",  "MAN", False), ("MAdN", "MAN", True),
@@ -72,20 +89,10 @@ ETS_LABELS = [s[0] for s in ETS_SPECS]
 # =============================================================================
 
 def build_correction_variants(df_ts):
-    """
-    Build COVID correction variants (non-winsorized only).
-    Winsorization is applied per-fold inside the CV worker.
-
-    Only seasonal-mean corrections are used. Interpolation methods (linear,
-    cubic, time) were removed because they use the full series for fitting,
-    creating data leakage when training windows extend past the COVID period.
-
-    _smean uses only pre-COVID seasonal references to avoid leakage.
-    """
+    """Build COVID correction variants (non-winsorized only)."""
     mask = (df_ts.index >= covid_start) & (df_ts.index <= covid_end)
 
     def _smean(ts, b):
-        """Replace COVID quarters with mean of b pre-COVID same-quarter values."""
         out = ts.copy()
         for d in ts.index[mask]:
             sq = ts.index[(ts.index.quarter == d.quarter) & (~mask)]
@@ -113,23 +120,11 @@ def winsorize_train(ts_train):
     return ts_train.clip(lower=lo, upper=hi)
 
 
-# =============================================================================
-# SEASONAL STABILITY DIAGNOSTIC
-# =============================================================================
-
 def check_seasonal_stability(df_ts, threshold=0.3):
-    """
-    Compare seasonal indices pre-COVID vs post-COVID.
-    Returns a warning string if seasonal shape has changed materially,
-    or None if stable.
-
-    Seasonal index = quarterly mean / overall mean for each period.
-    Threshold is the max allowable absolute change in any quarter's index.
-    """
+    """Compare seasonal indices pre/post COVID. Returns warning string or None."""
     pre = df_ts[df_ts.index < covid_start]
     post = df_ts[df_ts.index > covid_end]
-
-    if len(pre) < 8 or len(post) < 8:  # need at least 2 full years each
+    if len(pre) < 8 or len(post) < 8:
         return None
 
     def _seasonal_index(ts):
@@ -149,27 +144,37 @@ def check_seasonal_stability(df_ts, threshold=0.3):
 
 
 # =============================================================================
-# WORKER
+# WORKER — h=4 walk-forward CV for one correction
 # =============================================================================
 
 def run_cv_for_correction(corr_label, corr_values, corr_index,
                           orig_values, outer_start, season_length,
-                          ets_specs, ets_labels, seed):
+                          ets_specs, ets_labels, seed, horizon):
     """
-    Walk-forward CV for one correction (base + winsorized) × all ETS specs.
+    Walk-forward CV at h=`horizon` for one correction (base + winsorized) × all ETS specs.
 
-    Manual per-fold loop so:
-      - Winsorization uses only training data (no look-ahead)
-      - Each fold result carries fold_pos (temporal index)
-      - No ordering ambiguity
+    The 'origin position' p represents the index of the last training observation.
+    Training data is ts.iloc[:p+1]; we predict steps p+1..p+horizon.
 
-    Returns dict: {base_label: {...}, winsorized_label: {...}}
+    Latest viable origin: p = len(ts) - horizon - 1
+    First origin:         p = outer_start - 1   (so first training has outer_start obs)
+
+    Returns {variant_label: {fold_results: [...]}}.
+    Each fold_result has 'preds' as dict {spec_label: array of `horizon` predictions}.
     """
     np.random.seed(seed)
     warnings.filterwarnings("ignore")
     ts = pd.Series(corr_values, index=corr_index)
-    n_folds = len(ts) - outer_start
 
+    # Origin positions range from (outer_start - 1) to (len(ts) - horizon - 1) inclusive.
+    # First origin trains on ts.iloc[:outer_start]  (outer_start observations).
+    # Last origin trains on ts.iloc[:len(ts) - horizon]  and predicts the last horizon points.
+    first_origin = outer_start - 1
+    last_origin  = len(ts) - horizon - 1
+    if last_origin < first_origin:
+        return {}
+
+    n_folds = last_origin - first_origin + 1
     all_results = {}
 
     for is_winsorized in [False, True]:
@@ -178,10 +183,9 @@ def run_cv_for_correction(corr_label, corr_values, corr_index,
         fold_results = []
 
         for fold_idx in range(n_folds):
-            train_end = outer_start + fold_idx   # exclusive
-            test_idx  = train_end                # predict this point
-
-            train_ts = ts.iloc[:train_end].copy()
+            origin_pos = first_origin + fold_idx          # last training index
+            train_end  = origin_pos + 1                   # exclusive
+            train_ts   = ts.iloc[:train_end].copy()
             if is_winsorized:
                 train_ts = winsorize_train(train_ts)
 
@@ -191,29 +195,43 @@ def run_cv_for_correction(corr_label, corr_values, corr_index,
                 "y": train_ts.values,
             })
 
-            actual = float(orig_values[test_idx])
-            preds = {}
+            # Pull `horizon` actuals (always positions origin_pos+1 .. origin_pos+horizon).
+            actuals = orig_values[origin_pos + 1 : origin_pos + 1 + horizon].astype(float)
+            target_dates = ts.index[origin_pos + 1 : origin_pos + 1 + horizon]
+            origin_date  = ts.index[origin_pos]
 
-            # Fit each spec individually — one failure shouldn't kill the rest
+            # Defensive: we may have lost trailing rows somehow
+            if len(actuals) != horizon:
+                continue
+
+            preds = {}
             for spec_label, spec_model, spec_damped in ets_specs:
                 try:
                     m = AutoETS(season_length=season_length, model=spec_model,
                                 damped=spec_damped, alias=spec_label)
                     sf = StatsForecast(models=[m], freq="QE", n_jobs=1)
-                    fc = sf.forecast(df=sf_df, h=1)
+                    fc = sf.forecast(df=sf_df, h=horizon)
                     if spec_label in fc.columns:
-                        p = float(fc[spec_label].iloc[0])
-                        preds[spec_label] = p if np.isfinite(p) else np.nan
+                        pvals = fc[spec_label].values.astype(float)
+                        # statsforecast returns horizon rows; align defensively
+                        if len(pvals) >= horizon:
+                            arr = pvals[:horizon]
+                            arr = np.where(np.isfinite(arr), arr, np.nan)
+                        else:
+                            arr = np.full(horizon, np.nan)
+                        preds[spec_label] = arr
                     else:
-                        preds[spec_label] = np.nan
+                        preds[spec_label] = np.full(horizon, np.nan)
                 except Exception:
-                    preds[spec_label] = np.nan
+                    preds[spec_label] = np.full(horizon, np.nan)
 
             fold_results.append({
-                "fold_pos": fold_idx,
-                "date":     ts.index[test_idx],
-                "actual":   actual,
-                "preds":    preds,
+                "fold_pos":     fold_idx,
+                "origin_pos":   origin_pos,
+                "origin_date":  origin_date,
+                "target_dates": target_dates,
+                "actuals":      actuals,
+                "preds":        preds,
             })
 
         all_results[variant_label] = {
@@ -230,39 +248,41 @@ def run_cv_for_correction(corr_label, corr_values, corr_index,
 
 def process_segment(sbi_code, df_ts, pool, ets_specs, ets_labels):
     """
-    Full CV for one SBI segment.
+    Full h=`HORIZON` CV for one SBI segment.
 
-    Selection on inner folds (fold_pos < n_inner), reporting on outer
-    (fold_pos >= n_inner). Uses fold_pos, not list position.
-
-    Saves full prediction matrix for all configs, not just the winner.
+    Selection on inner folds (fold_pos < n_inner). Aggregation: MEAN MAE
+    across all `HORIZON` horizons gives a single scalar per (correction, spec)
+    for comparison and selection.
 
     Returns:
-        cv_records:       list of dicts — winner-only fold results
-        all_pred_records: list of dicts — full prediction matrix (all configs)
+        cv_records:       winner-only fold-level records (4 rows per fold)
+        all_pred_records: full prediction matrix (all configs × all folds × 4 horizons)
         config:           dict or None — winning config metadata
     """
     variants = build_correction_variants(df_ts)
     orig = df_ts.values.ravel().astype(np.float64)
 
-    # Dynamic outer_start: max of absolute minimum and fraction-based minimum
     outer_start = max(MIN_TRAIN_ABS, int(len(df_ts) * MIN_TRAIN_FRAC))
-    n_total_folds = len(df_ts) - outer_start
+
+    # Folds: see header docstring. We need 5 viable folds to maintain the
+    # inner/outer split semantics; outer_start might leave too few.
+    first_origin = outer_start - 1
+    last_origin  = len(df_ts) - HORIZON - 1
+    n_total_folds = max(0, last_origin - first_origin + 1)
 
     if n_total_folds < 5:
         print(f"    ⚠️  {sbi_code}: only {n_total_folds} folds with "
-              f"outer_start={outer_start}. Skipping.")
+              f"outer_start={outer_start}, h={HORIZON}. Skipping.")
         return [], [], None
 
     seg_start = time.time()
-
     n_inner = max(1, int(n_total_folds * INNER_FRAC))
     n_outer = n_total_folds - n_inner
 
     print(f"      Training start: {outer_start} quarters | "
-          f"Folds: {n_total_folds} = {n_inner} inner + {n_outer} outer")
+          f"Folds: {n_total_folds} = {n_inner} inner + {n_outer} outer | "
+          f"Horizons: {HORIZON}")
 
-    # Seasonal stability check
     seasonal_warn = check_seasonal_stability(df_ts)
     if seasonal_warn:
         print(f"    ⚠️  SEASONAL: {seasonal_warn}")
@@ -273,7 +293,7 @@ def process_segment(sbi_code, df_ts, pool, ets_specs, ets_labels):
         f = pool.submit(
             run_cv_for_correction, label,
             ts_c.values.ravel().astype(np.float64), ts_c.index,
-            orig, outer_start, 4, ets_specs, ets_labels, SEED,
+            orig, outer_start, 4, ets_specs, ets_labels, SEED, HORIZON,
         )
         futures[f] = label
 
@@ -286,27 +306,23 @@ def process_segment(sbi_code, df_ts, pool, ets_specs, ets_labels):
             print(f"    ⚠️  [{base_label}]: {exc}")
             for suffix in ["", "|winsorized"]:
                 lbl = f"{base_label}{suffix}" if suffix else base_label
-                corr_results[lbl] = {
-                    "correction": lbl, "fold_results": [],
-                    "error": str(exc),
-                }
+                corr_results[lbl] = {"correction": lbl, "fold_results": [],
+                                     "error": str(exc)}
 
-    n_variants = len(corr_results)
-
-    # Diagnostic: count valid predictions
+    # Diagnostic
     total_valid = 0
-    total_nan = 0
+    total_nan   = 0
     for label, wr in corr_results.items():
         if wr.get("error"):
             continue
         for fr in wr.get("fold_results", []):
-            valid = sum(1 for v in fr["preds"].values() if pd.notna(v))
-            total_valid += valid
-            total_nan += len(fr["preds"]) - valid
-    print(f"      Diagnostics: {total_valid} valid preds, "
-          f"{total_nan} NaN preds across all variants")
+            for spec, arr in fr["preds"].items():
+                total_valid += int(np.isfinite(arr).sum())
+                total_nan   += int(np.isnan(arr).sum())
+    print(f"      Diagnostics: {total_valid} valid horizon-preds, "
+          f"{total_nan} NaN horizon-preds across all variants")
 
-    # --- Build FULL prediction matrix (all configs, all folds) ---
+    # --- Build FULL prediction matrix (all configs, all folds, all horizons) ---
     all_pred_records = []
     for label, wr in corr_results.items():
         if wr.get("error") or not wr["fold_results"]:
@@ -314,159 +330,103 @@ def process_segment(sbi_code, df_ts, pool, ets_specs, ets_labels):
         for fr in wr["fold_results"]:
             is_outer = fr["fold_pos"] >= n_inner
             for spec in ets_labels:
-                pred = fr["preds"].get(spec, np.nan)
-                ok = pd.notna(pred)
-                all_pred_records.append({
-                    "sbi_code":   sbi_code,
-                    "correction": label,
-                    "model_spec": spec,
-                    "date":       fr["date"],
-                    "actual":     fr["actual"],
-                    "pred":       pred if ok else np.nan,
-                    "abs_error":  abs(fr["actual"] - pred) if ok else np.nan,
-                    "fold_set":   "outer" if is_outer else "inner",
-                    "fold_pos":   fr["fold_pos"],
-                })
+                arr = fr["preds"].get(spec, np.full(HORIZON, np.nan))
+                for h_idx in range(HORIZON):
+                    horizon = h_idx + 1
+                    pred    = arr[h_idx]
+                    actual  = float(fr["actuals"][h_idx])
+                    ok      = np.isfinite(pred)
+                    all_pred_records.append({
+                        "sbi_code":    sbi_code,
+                        "correction":  label,
+                        "model_spec":  spec,
+                        "origin_date": fr["origin_date"],
+                        "target_date": fr["target_dates"][h_idx],
+                        "horizon":     horizon,
+                        "actual":      actual,
+                        "pred":        float(pred) if ok else np.nan,
+                        "abs_error":   float(abs(actual - pred)) if ok else np.nan,
+                        "fold_set":    "outer" if is_outer else "inner",
+                        "fold_pos":    fr["fold_pos"],
+                    })
 
-    # --- Select best (correction, model_spec) on inner folds ---
-    best_inner_mae = np.inf
+    # --- Select best (correction, spec) on inner folds using mean MAE
+    #     averaged across all HORIZON horizons ---
+    best_inner_mae  = np.inf
     best_corr_label = None
     best_model_spec = None
-    n_configs_searched = 0
 
     for label, wr in corr_results.items():
         if wr.get("error") or not wr["fold_results"]:
             continue
-
         for spec in ets_labels:
-            inner_errors = []
+            errs = []
             for fr in wr["fold_results"]:
-                if fr["fold_pos"] < n_inner:
-                    p = fr["preds"].get(spec, np.nan)
-                    if pd.notna(p):
-                        inner_errors.append(abs(fr["actual"] - p))
-
-            if inner_errors:
-                n_configs_searched += 1
-                mae_val = np.mean(inner_errors)
+                if fr["fold_pos"] >= n_inner:
+                    continue
+                arr = fr["preds"].get(spec, np.full(HORIZON, np.nan))
+                actuals = fr["actuals"]
+                for h_idx in range(HORIZON):
+                    if np.isfinite(arr[h_idx]):
+                        errs.append(abs(actuals[h_idx] - arr[h_idx]))
+            if errs:
+                mae_val = float(np.mean(errs))
                 if mae_val < best_inner_mae:
-                    best_inner_mae = mae_val
+                    best_inner_mae  = mae_val
                     best_corr_label = label
                     best_model_spec = spec
 
-    # --- Build winner-only records (backward compatible) ---
+    # --- Winner-only records (4 rows per fold) ---
     cv_records = []
     outer_errors = []
 
     if best_corr_label is not None:
         wr = corr_results[best_corr_label]
         for fr in wr["fold_results"]:
-            pred = fr["preds"].get(best_model_spec, np.nan)
-            ok = pd.notna(pred)
+            arr = fr["preds"].get(best_model_spec, np.full(HORIZON, np.nan))
             is_outer = fr["fold_pos"] >= n_inner
-
-            cv_records.append({
-                "sbi_code":   sbi_code,
-                "correction": best_corr_label,
-                "date":       fr["date"],
-                "actual":     fr["actual"],
-                "pred":       pred if ok else np.nan,
-                "abs_error":  abs(fr["actual"] - pred) if ok else np.nan,
-                "model_spec": best_model_spec,
-                "fold_set":   "outer" if is_outer else "inner",
-                "fold_pos":   fr["fold_pos"],
-            })
-
-            if is_outer and ok:
-                outer_errors.append(abs(fr["actual"] - pred))
+            for h_idx in range(HORIZON):
+                horizon = h_idx + 1
+                pred = arr[h_idx]
+                actual = float(fr["actuals"][h_idx])
+                ok = np.isfinite(pred)
+                cv_records.append({
+                    "sbi_code":    sbi_code,
+                    "correction":  best_corr_label,
+                    "model_spec":  best_model_spec,
+                    "origin_date": fr["origin_date"],
+                    "target_date": fr["target_dates"][h_idx],
+                    "horizon":     horizon,
+                    "actual":      actual,
+                    "pred":        float(pred) if ok else np.nan,
+                    "abs_error":   float(abs(actual - pred)) if ok else np.nan,
+                    "fold_set":    "outer" if is_outer else "inner",
+                    "fold_pos":    fr["fold_pos"],
+                })
+                if is_outer and ok:
+                    outer_errors.append(abs(actual - pred))
 
     seg_min = (time.time() - seg_start) / 60
+    outer_mae = float(np.mean(outer_errors)) if outer_errors else np.nan
 
-    # Structural break detection: rolling MAE with sustained drift
-    struct_warn = None
-    if best_corr_label and len(outer_errors) >= 4:
-        folds = corr_results[best_corr_label]["fold_results"]
-        abs_errors_all = []
-        for fr in folds:
-            p = fr["preds"].get(best_model_spec, np.nan)
-            if pd.notna(p):
-                abs_errors_all.append(abs(fr["actual"] - p))
+    config = None
+    if best_corr_label is not None:
+        df_ts_corrected = variants[best_corr_label.replace("|winsorized", "")].copy()
+        config = {
+            "sbi_code":            sbi_code,
+            "winning_correction":  best_corr_label,
+            "best_model_spec":     best_model_spec,
+            "inner_mae":           best_inner_mae,
+            "outer_mae":           outer_mae,
+            "n_inner_folds":       n_inner,
+            "n_outer_folds":       n_outer,
+            "horizon":             HORIZON,
+            "seasonal_shift_warning": seasonal_warn,
+            "df_ts_corrected":     df_ts_corrected,
+            "seg_minutes":         seg_min,
+        }
 
-        if len(abs_errors_all) >= 8:
-            # Rolling window of 4 quarters
-            errs = pd.Series(abs_errors_all)
-            rolling_mae = errs.rolling(4, min_periods=4).mean().dropna()
-            if len(rolling_mae) >= 2:
-                early_mae = rolling_mae.iloc[:len(rolling_mae)//2].mean()
-                late_mae = rolling_mae.iloc[len(rolling_mae)//2:].mean()
-                if early_mae > 0:
-                    ratio = late_mae / early_mae
-                    if ratio > 1.8 or ratio < 0.55:
-                        struct_warn = (f"Rolling MAE drift: late/early = "
-                                       f"{ratio:.2f} (early={early_mae:.3f}, "
-                                       f"late={late_mae:.3f})")
-                        print(f"    ⚠️  BREAK: {struct_warn}")
-
-    print(f"    ⏱️  {sbi_code}: {n_variants} variants × "
-          f"{n_total_folds} folds × {len(ets_labels)} specs "
-          f"in {seg_min:.1f} min")
-
-    if best_corr_label is None:
-        return cv_records, all_pred_records, None
-
-    outer_mae = np.mean(outer_errors) if outer_errors else np.nan
-
-    # Inner vs outer MAE ratio diagnostic
-    inner_outer_ratio = (best_inner_mae / outer_mae
-                         if outer_mae and outer_mae > 0 else np.nan)
-
-    config = {
-        "winning_correction":       best_corr_label,
-        "df_ts_corrected":          _apply_winsorization_if_needed(
-            variants, best_corr_label, df_ts),
-        "correction_is_winsorized": "|winsorized" in best_corr_label,
-        "best_model_spec":          best_model_spec,
-        "inner_mae":                float(best_inner_mae),
-        "outer_mae":                float(outer_mae),
-        "inner_outer_ratio":        float(inner_outer_ratio)
-                                    if np.isfinite(inner_outer_ratio) else None,
-        "n_inner_folds":            n_inner,
-        "n_outer_folds":            n_outer,
-        "n_configs_searched":       n_configs_searched,
-        "structural_break_warning": struct_warn,
-        "seasonal_shift_warning":   seasonal_warn,
-    }
-
-    ratio_str = (f"{inner_outer_ratio:.2f}"
-                 if isinstance(inner_outer_ratio, float)
-                 and np.isfinite(inner_outer_ratio) else "n/a")
-    print(f"    🏆 {best_corr_label} | {best_model_spec} | "
-          f"inner={best_inner_mae:.4f} outer={outer_mae:.4f} "
-          f"ratio={ratio_str}")
     return cv_records, all_pred_records, config
-
-
-def _apply_winsorization_if_needed(variants, best_corr_label, df_ts_orig):
-    """
-    FIX: When the winning config is a winsorized variant, apply winsorization
-    to the stored corrected series so that the downstream final model fit
-    is consistent with what was selected during CV.
-
-    Note: CV used per-fold winsorization (growing training window → different
-    quantile boundaries per fold). Here we winsorize the full series, which
-    is a pragmatic approximation. The quantile boundaries may differ slightly
-    from what any individual CV fold used, but this is preferable to the
-    original behavior of not winsorizing at all.
-    """
-    base_label = best_corr_label.split("|winsorized")[0]
-    ts_corrected = variants.get(base_label, df_ts_orig).copy()
-
-    if "|winsorized" in best_corr_label:
-        lo = ts_corrected.quantile(0.05)
-        hi = ts_corrected.quantile(0.95)
-        ts_corrected = ts_corrected.clip(lower=lo, upper=hi)
-
-    return ts_corrected
 
 
 # =============================================================================
@@ -474,144 +434,73 @@ def _apply_winsorization_if_needed(variants, best_corr_label, df_ts_orig):
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="ETS walk-forward CV across SBI segments"
-    )
+    parser = argparse.ArgumentParser(description=f"AutoETS h={HORIZON} walk-forward CV")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int, default=N_WORKERS)
-    parser.add_argument("--segment", type=str, default=None)
-    args = parser.parse_args()
-
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    warnings.filterwarnings("ignore")
-    np.random.seed(SEED)
-
-    print("=" * 60)
-    print("  LOADING DATA")
-    print("=" * 60)
-
-    query = """
-    SELECT
-        Perioden as timeperiod_text,
-        BedrijfskenmerkenSBI2008 as sbi_code,
-        BedrijfskenmerkenSBI2008_Title as sbi_title,
-        DATE(printf('%s-%s-01',
-            substr(Perioden, 1, 4),
-            CASE substr(Perioden, 7, 2)
-                WHEN '01' THEN '01' WHEN '02' THEN '04'
-                WHEN '03' THEN '07' WHEN '04' THEN '10'
-            END), '+3 months', '-1 day'
-        ) AS period_enddate,
-        CAST(substr(Perioden, 1, 4) as INTEGER) as "year",
-        CAST(substr(Perioden, 8, 1) as INTEGER) as "quarter",
-        CAST(Ziekteverzuimpercentage_1 AS REAL) as absenteeism_perc
-    FROM "80072ned_silver"
-    WHERE Perioden NOT LIKE '%JJ%'
-    AND substr(Perioden, 1, 4) >= '2012'
-    ORDER BY sbi_code, period_enddate ASC
-    """
-    df_org = f_query_database(DIR_DB_SILVER, query, "pandas")
-    df_org["absenteeism_perc"] = pd.to_numeric(
-        df_org["absenteeism_perc"], errors="coerce"
+    parser.add_argument("--segment", type=str, default=None,
+                        help="If set, only process this SBI code")
+    parser.add_argument(
+        "--data-source", choices=["gold", "silver"], default="gold",
+        help="Where to read target series from.  "
+             "'gold' (default): imputed values from master_data_ml_preprocessed, "
+             "matching what Pipeline trains on.  "
+             "'silver': raw observations from 80072ned_silver with contiguous-tail "
+             "extraction for the 13 reorganized sectors (no fabricated values).  "
+             "Use 'silver' for sensitivity analysis; outputs are written with a "
+             "'_silver' suffix to avoid overwriting the primary gold run.",
     )
-    df_org["period_enddate"] = pd.to_datetime(df_org["period_enddate"])
+    args = parser.parse_args()
+    OUTPUT_DIR.mkdir(exist_ok=True)
 
-    codes = sorted(df_org["sbi_code"].unique())
-    if args.segment:
-        if args.segment not in codes:
-            print(f"  ❌ '{args.segment}' not found. Available: {codes}")
-            return
-        codes = [args.segment]
+    # Output-filename suffix lets the two data-source runs coexist on disk
+    out_suffix = "_silver" if args.data_source == "silver" else ""
 
-    # --- Build segments with frequency validation ---
+    print("=" * 60)
+    print(f"  AUTOETS WALK-FORWARD CV — HORIZON = {HORIZON}")
+    print(f"  Data source: {args.data_source.upper()}"
+          f"{'  (sensitivity run; outputs *_silver.parquet)' if out_suffix else ''}")
+    print("=" * 60)
+
+    # --- Load per-sector target series ---
+    # Gold: imputed values, identical inputs to Pipeline.
+    # Silver: raw observations + contiguous-tail extraction for sectors with gaps.
+    if args.data_source == "gold":
+        print("  Loading target series from gold table...")
+        segments_all = load_target_series_from_gold(
+            gold_db_path=DIR_DB_GOLD,
+            min_history=MIN_HISTORY,
+            verbose=True,
+        )
+    else:
+        print("  Loading target series from silver table (contiguous-tail mode)...")
+        segments_all = load_target_series_from_silver(
+            silver_db_path=DIR_DB_SILVER,
+            min_history=MIN_HISTORY,
+            verbose=True,
+        )
+
+    # Snap each series to quarterly frequency and filter to --segment if set
     segments = {}
-
-    for c in codes:
-        sub = (df_org[df_org["sbi_code"] == c]
-               .sort_values("period_enddate")
-               .drop_duplicates("period_enddate")
-               .set_index("period_enddate")["absenteeism_perc"])
-
-        raw_dates = sub.index.copy()
-
-        # Normalize to QuarterEnd
-        try:
-            sub.index = sub.index + pd.offsets.QuarterEnd(0)
-            sub = sub[~sub.index.duplicated(keep='last')]
-        except Exception:
-            print(f"  ⚠️  Skipping {c}: failed to normalize to QE")
+    for c, ts in segments_all.items():
+        if args.segment and c != args.segment:
             continue
-
-        # Validate quarterly spacing
-        inferred = pd.infer_freq(sub.index)
-        if inferred is not None:
-            try:
-                offset = pd.tseries.frequencies.to_offset(inferred)
-                if not isinstance(offset, pd.offsets.QuarterEnd):
-                    print(f"  ⚠️  Skipping {c}: freq '{inferred}' not QE")
-                    continue
-            except ValueError:
-                # Fallback: check median day spacing
-                diffs = sub.index.to_series().diff().dropna()
-                median_days = diffs.dt.days.median()
-                if not (80 <= median_days <= 100):
-                    print(f"  ⚠️  Skipping {c}: spacing {median_days:.0f}d")
-                    continue
-        else:
-            diffs = sub.index.to_series().diff().dropna()
-            median_days = diffs.dt.days.median()
-            if not (80 <= median_days <= 100):
-                print(f"  ⚠️  Skipping {c}: spacing {median_days:.0f}d")
-                continue
-
-        ts = sub.asfreq("QE")
-
-        # Handle NaNs from QE normalization
+        ts = ts.asfreq("QE")
         if ts.isna().any():
-            na_dates = ts.index[ts.isna()]
-            truly_missing = []
-            for nad in na_dates:
-                if (np.abs(raw_dates - nad)).min() > pd.Timedelta(days=5):
-                    truly_missing.append(nad)
-            if truly_missing:
-                print(f"  ⚠️  Skipping {c}: {len(truly_missing)} missing Qs")
-                continue
-            for nad in na_dates:
-                nearest_i = (np.abs(raw_dates - nad)).argmin()
-                ts[nad] = df_org.loc[
-                    (df_org["sbi_code"] == c) &
-                    (df_org["period_enddate"] == raw_dates[nearest_i]),
-                    "absenteeism_perc"
-                ].iloc[0]
-            if ts.isna().any():
-                print(f"  ⚠️  Skipping {c}: unresolvable NaN")
-                continue
-
-        # Minimum length: need enough for training + at least 5 folds
-        min_len = MIN_TRAIN_ABS + 5
-        if len(ts) < min_len:
-            print(f"  ⚠️  Skipping {c} ({len(ts)} obs, need {min_len})")
+            print(f"  ⚠️  Skipping {c}: unexpected NaN ({ts.isna().sum()} NaN)")
             continue
-
+        if len(ts) < MIN_HISTORY:
+            print(f"  ⚠️  Skipping {c} ({len(ts)} obs, need {MIN_HISTORY})")
+            continue
         segments[c] = ts
 
     if not segments:
         print("  No valid segments.")
         return
 
-    # --- Pre-run summary ---
-    n_base = 3  # no_correction + 2×seasonal_mean
-    n_total = n_base * 2  # ×2 for winsorized
-
+    n_base = 3
+    n_total = n_base * 2
     print(f"\n  Segments: {len(segments)} | ETS specs: {len(ETS_SPECS)} | "
           f"Correction variants: {n_total}")
-    print(f"  Configs/segment: {n_total * len(ETS_SPECS)}")
-    for c, ts in segments.items():
-        os_val = max(MIN_TRAIN_ABS, int(len(ts) * MIN_TRAIN_FRAC))
-        n_folds = len(ts) - os_val
-        n_in = max(1, int(n_folds * INNER_FRAC))
-        print(f"    {c}: {len(ts)} obs, {n_folds} folds "
-              f"({n_in} inner + {n_folds - n_in} outer)")
 
     if args.dry_run:
         print("\n  --dry-run: exiting.\n")
@@ -625,9 +514,7 @@ def main():
 
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for i, (code, df_ts) in enumerate(segments.items()):
-            print(f"\n{'='*60}")
-            print(f"  SEGMENT {i+1}/{len(segments)}: {code}")
-            print(f"{'='*60}")
+            print(f"\n  SEGMENT {i+1}/{len(segments)}: {code}")
             records, pred_records, config = process_segment(
                 code, df_ts, pool, ETS_SPECS, ETS_LABELS
             )
@@ -640,97 +527,63 @@ def main():
     warnings.filterwarnings("default")
 
     df_cv = pd.DataFrame(all_records)
-    df_all_preds = pd.DataFrame(all_pred_records)
+    df_all = pd.DataFrame(all_pred_records)
 
     if len(df_cv) == 0:
         print("  No results.")
         return
 
-    # --- Summary stats per fold set ---
-    def _agg(g):
-        v = g.dropna(subset=["pred"])
-        if len(v) == 0:
-            return pd.Series({"mean_mae": np.nan, "mean_rmse": np.nan,
-                              "mape": np.nan, "n_folds": 0})
-        e = v["pred"] - v["actual"]
-        return pd.Series({
-            "mean_mae":  v["abs_error"].mean(),
-            "mean_rmse": np.sqrt(np.mean(e**2)),
-            "mape":      (np.abs(e / v["actual"]) * 100).mean(),
-            "n_folds":   len(v),
-        })
-
-    for fsl in ["inner", "outer"]:
-        subset = df_cv[df_cv["fold_set"] == fsl]
-        if len(subset) > 0:
-            s = (subset.groupby(["sbi_code","correction"], group_keys=False)
-                 .apply(_agg).sort_values(["sbi_code","mean_mae"]))
-            p = OUTPUT_DIR / f"autoets_cv_summary_{fsl}.parquet"
-            s.to_parquet(p); print(f"\n  ✅ {p}")
-
-    # --- Results table ---
-    print(f"\n{'='*60}")
-    print(f"  RESULTS — {total_min:.1f} min")
-    print(f"{'='*60}\n")
-    print(f"  {'Seg':<12} {'Correction':<30} {'Spec':<8} "
-          f"{'Inner':>7} {'Outer':>7} {'Ratio':>7} {'Warnings'}")
-    print(f"  {'-'*90}")
-    for c, cfg in sorted(all_configs.items()):
-        warns = []
-        if cfg.get("structural_break_warning"):
-            warns.append("BREAK")
-        if cfg.get("seasonal_shift_warning"):
-            warns.append("SEASON")
-        ratio_str = (f"{cfg['inner_outer_ratio']:.2f}"
-                     if cfg.get('inner_outer_ratio') else "n/a")
-        warn_str = ", ".join(warns) if warns else ""
-        print(f"  {c:<12} {cfg['winning_correction']:<30} "
-              f"{cfg['best_model_spec']:<8} "
-              f"{cfg['inner_mae']:>7.4f} {cfg['outer_mae']:>7.4f} "
-              f"{ratio_str:>7} {warn_str}")
-
     # --- Save ---
-    p1 = OUTPUT_DIR / "autoets_cv_results.parquet"
-    p2 = OUTPUT_DIR / "autoets_cv_all_predictions.parquet"
-    p3_json = OUTPUT_DIR / "autoets_best_configs.json"
-    p3_ts   = OUTPUT_DIR / "autoets_corrected_series.parquet"
+    p1 = OUTPUT_DIR / f"autoets_cv_results{out_suffix}.parquet"
+    p2 = OUTPUT_DIR / f"autoets_cv_all_predictions{out_suffix}.parquet"
+    p3_json = OUTPUT_DIR / f"autoets_best_configs{out_suffix}.json"
 
-    df_cv.to_parquet(p1, index=False)
-    print(f"\n  ✅ {p1}")
-
-    df_all_preds.to_parquet(p2, index=False)
-    print(f"  ✅ {p2} ({len(df_all_preds)} rows)")
+    df_cv.to_parquet(p1, index=False);   print(f"\n  ✅ {p1}")
+    df_all.to_parquet(p2, index=False);  print(f"  ✅ {p2} ({len(df_all)} rows)")
 
     configs_json = {}
-    corrected_series = {}
     for code, cfg in all_configs.items():
-        ts_corr = cfg.pop("df_ts_corrected")
-        corrected_series[code] = ts_corr
+        cfg.pop("df_ts_corrected", None)
         configs_json[code] = {
             k: (float(v) if isinstance(v, np.floating)
                 else int(v) if isinstance(v, np.integer) else v)
             for k, v in cfg.items()
         }
-
     with open(p3_json, "w") as f:
         json.dump(configs_json, f, indent=2, default=str)
     print(f"  ✅ {p3_json}")
 
-    ts_frames = []
-    for code, ts in corrected_series.items():
-        fr = ts.reset_index()
-        fr.columns = ["period_enddate", "absenteeism_perc"]
-        fr["sbi_code"] = code
-        ts_frames.append(fr)
-    if ts_frames:
-        pd.concat(ts_frames, ignore_index=True).to_parquet(p3_ts, index=False)
-        print(f"  ✅ {p3_ts}")
-
-    print(f'\n  Load:\n'
-          f'    df_cv = pd.read_parquet("{p1}")\n'
-          f'    df_all = pd.read_parquet("{p2}")\n'
-          f'    configs = json.load(open("{p3_json}"))\n'
-          f'    # Unbiased: df_cv[df_cv["fold_set"]=="outer"]')
+    # ----- Canonical-schema export for evaluation_method.py -----
+    # Keep only OUTER-fold rows from the winning (correction, model_spec) per
+    # sector — that's the unbiased estimate of out-of-sample performance.
+    #
+    # IMPORTANT: model_name is "AutoETS" (family-level), not per-spec.  Each
+    # sector may select a different winning spec (MAdM, MNA, etc.) on inner
+    # folds, but for the cross-model comparison we treat AutoETS as one
+    # METHOD that internally chooses its spec.  Per-sector spec details are
+    # preserved in autoets_cv_results.parquet / autoets_best_configs.json
+    # for diagnostic inspection.  Using per-spec names here would create
+    # multiple sparse model_names (one per spec) that break friedman_nemenyi
+    # because each spec only has predictions for the sectors that selected it.
+    winner_mask = df_cv["fold_set"] == "outer"
+    winner_outer = df_cv[winner_mask].dropna(subset=["pred"]).copy()
+    canonical = pd.DataFrame({
+        "model_name":   "AutoETS",
+        "sector_code":  winner_outer["sbi_code"].astype(str),
+        "origin_date":  pd.to_datetime(winner_outer["origin_date"]),
+        "target_date":  pd.to_datetime(winner_outer["target_date"]),
+        "horizon":      winner_outer["horizon"].astype(int),
+        "y_true":       winner_outer["actual"].astype(float),
+        "y_pred":       winner_outer["pred"].astype(float),
+        "y_lower_80":   np.nan,
+        "y_upper_80":   np.nan,
+        "y_lower_95":   np.nan,
+        "y_upper_95":   np.nan,
+    })
+    p_canon = OUTPUT_DIR / f"autoets_predictions{out_suffix}.parquet"
+    canonical.to_parquet(p_canon, index=False)
+    print(f"  ✅ {p_canon} (canonical, {len(canonical)} rows)")
+    print(f"\n  Total: {total_min:.1f} min")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from config import DIR_DB_SILVER
+from src.config import DIR_DB_SILVER
 from src.utils.m_query_database import f_query_database
 
 # =============================================================================

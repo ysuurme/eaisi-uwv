@@ -25,6 +25,13 @@ Feature selection modes
 groups    — resolves named groups from FEATURE_CATALOG to concrete column names
 discovery — uses all remaining columns after structural and OHE columns are
             removed
+
+Full-panel loading
+------------------
+``load_full_panel()`` loads the complete gold table without SBI filtering,
+keeping all sectors and all OHE columns.  It reconstructs a categorical
+``sector`` column from the OHE encoding.  This is used by the feature
+selection module, which needs cross-sector analysis.
 """
 from pathlib import Path
 from typing import List, Optional
@@ -40,10 +47,31 @@ _DATE_COL = "period_enddate"
 # OHE column for the CBS national total (T001081) — mirrors notebook's sbi_code == "T001081"
 _NATIONAL_TOTAL_COL = "BedrijfskenmerkenSBI2008_T001081"
 
-# Columns kept as structural context (date + temporal indices)
+# OHE column prefix for all SBI sector indicators
+_OHE_PREFIX = "BedrijfskenmerkenSBI2008_"
+
+# Columns kept as structural context (date + temporal indices + regime indicators).
 # Note: BedrijfstakkenBranchesSBI2008 does NOT exist in the gold feature store;
 # sector identity is encoded via OHE columns (BedrijfskenmerkenSBI2008_*).
-_KEEP_STRUCTURAL = {"period_enddate", "year", "quarter"}
+#
+# trend_index / covid_period / post_covid / covid_depth / recovery_quarters /
+# trend_x_post_covid / quarter_x_post_covid are theoretically motivated regime
+# indicators that must always reach the model regardless of preset filtering.
+# trend_index in particular is declared STRUCTURAL in feature_selection_utils.py
+# and is therefore never in any preset's surviving_features list — without this
+# injection it would never reach the model.
+#
+# The continuous (covid_depth, recovery_quarters) and interaction
+# (trend_x_post_covid, quarter_x_post_covid) features give linear models the
+# lever to fit regime-dependent slope and seasonality without expanding
+# parameter count uncontrollably.
+_KEEP_STRUCTURAL = {
+    "period_enddate", "year", "quarter",
+    "trend_index",
+    "covid_period", "post_covid",
+    "covid_depth", "recovery_quarters",
+    "trend_x_post_covid", "quarter_x_post_covid",
+}
 
 # Silently dropped — pipeline artefacts with no ML or context value
 _DROP_ALWAYS = {"silver_id"}
@@ -91,20 +119,107 @@ class DataExtractor:
             feature_columns = self._resolve_groups(feature_groups, available_columns)
             mode = "groups"
         else:
-            feature_columns = [
-                c for c in df.columns
-                if c != target_column and c not in _STRUCTURAL_COLUMNS
-            ]
+            feature_columns = self.derive_feature_columns(df, target_column)
             mode = "discovery"
 
         structural_present = [c for c in df.columns if c in _KEEP_STRUCTURAL]
-        columns_to_keep = structural_present + [target_column] + feature_columns
+        # Order-preserving dedup: a structural column may also appear in
+        # feature_columns if a preset's group lists it explicitly.  Without
+        # dedup, df[[col, col]] would return duplicate columns and break
+        # downstream numeric dtype assertions.
+        columns_to_keep = list(dict.fromkeys(
+            structural_present + [target_column] + feature_columns
+        ))
         df = df[[c for c in columns_to_keep if c in available_columns]]
 
         sbi_label = sbi_filter_col or "all-industry"
         f_log(
             f"Extraction complete | mode={mode} | sbi={sbi_label} | "
             f"features={len(feature_columns)} | rows={df.shape[0]}",
+            c_type="success",
+        )
+        return df
+
+    # ------------------------------------------------------------------
+    # Feature-column derivation (single source of truth)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def derive_feature_columns(
+        cls,
+        df: pd.DataFrame,
+        target_column: str,
+    ) -> List[str]:
+        """Derive candidate ML feature columns from a gold-table frame.
+
+        Single source of truth for "what is a feature column": every column
+        except the target, the structural context (date/temporal keys, regime
+        indicators, pipeline artefacts), the OHE sector indicators, and the
+        synthetic ``sector`` label added by ``load_full_panel()``.
+
+        Used by ``extract()`` in discovery mode (where OHE columns are already
+        dropped) and by the feature-selection flow
+        (``ml_orchestrator.run_feature_selection``), which operates on the full
+        panel.  Column order follows the frame (deterministic).
+        """
+        excluded = _STRUCTURAL_COLUMNS | {target_column, "sector"}
+        return [
+            c for c in df.columns
+            if c not in excluded and not c.startswith(_OHE_PREFIX)
+        ]
+
+    # ------------------------------------------------------------------
+    # Full-panel loader for feature selection
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def load_full_panel(
+        cls,
+        db_path: Path,
+        table_name: str = "master_data_ml_preprocessed",
+    ) -> pd.DataFrame:
+        """Load the complete gold table without SBI filtering.
+
+        Returns the full panel (all sectors × all quarters) with a
+        reconstructed categorical ``sector`` column derived from the OHE
+        columns.  The OHE columns are retained so that downstream code
+        can identify and exclude them from the feature set.
+
+        This method is used by ``feature_selection.py``, which needs
+        cross-sector analysis (per-sector correlation, Granger tests, etc.)
+        that requires the complete panel — unlike ``extract()``, which
+        filters to a single sector for the ML pipeline.
+
+        Args:
+            db_path: Path to the Gold SQLite database.
+            table_name: Name of the preprocessed table in the gold store.
+
+        Returns:
+            DataFrame with all rows, all columns, plus a synthetic
+            ``sector`` column (e.g. ``"T001081"``, ``"301000"``).
+        """
+        engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+        df = pd.read_sql_table(table_name, engine)
+        df = df.sort_values(_DATE_COL).reset_index(drop=True)
+
+        # Reconstruct sector identity from OHE columns.
+        # Each row has exactly one OHE column == 1; idxmax finds it.
+        ohe_cols = [c for c in df.columns if c.startswith(_OHE_PREFIX)]
+        if not ohe_cols:
+            raise ValueError(
+                f"No OHE columns with prefix '{_OHE_PREFIX}' found in "
+                f"table '{table_name}'.  Cannot reconstruct sector identity."
+            )
+        df["sector"] = (
+            df[ohe_cols]
+            .idxmax(axis=1)
+            .str.replace(_OHE_PREFIX, "", regex=False)
+        )
+
+        f_log(
+            f"Full panel loaded | {df.shape[0]} rows × {df.shape[1]} cols | "
+            f"{df['sector'].nunique()} sectors | "
+            f"{df[_DATE_COL].nunique()} quarters",
             c_type="success",
         )
         return df
@@ -134,7 +249,7 @@ class DataExtractor:
         In both modes all OHE SBI columns are then dropped because they carry
         no predictive signal once the series is isolated to a single entity.
         """
-        ohe_cols = [c for c in df.columns if c.startswith("BedrijfskenmerkenSBI2008_")]
+        ohe_cols = [c for c in df.columns if c.startswith(_OHE_PREFIX)]
 
         # Determine which OHE column identifies the desired series
         effective_col = sbi_filter_col if sbi_filter_col is not None else _NATIONAL_TOTAL_COL
@@ -143,7 +258,7 @@ class DataExtractor:
         if effective_col not in df.columns:
             raise ValueError(
                 f"SBI column '{effective_col}' not found in dataset.  "
-                f"OHE columns start with 'BedrijfskenmerkenSBI2008_'."
+                f"OHE columns start with '{_OHE_PREFIX}'."
             )
 
         df = df[df[effective_col] == 1].copy()

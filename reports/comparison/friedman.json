@@ -1,0 +1,14 @@
+{
+  "friedman_p": 1.5849737279836665e-14,
+  "friedman_stat": 67.33846153846162,
+  "n_sectors": 39,
+  "n_models": 4,
+  "mean_ranks": {
+    "AutoETS_Stat": 1.6666666666666667,
+    "Chronos_Bolt": 1.7692307692307692,
+    "Pipeline": 2.8205128205128207,
+    "STL_ETS": 3.7435897435897436
+  },
+  "nemenyi_cd": 0.7510540171999194,
+  "note": "Models with rank difference > 0.751 are significantly different at \u03b1=0.05 (Nemenyi)"
+}

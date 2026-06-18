@@ -45,8 +45,9 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.inspection import permutation_importance as sk_permutation_importance
-from sklearn.linear_model import LassoCV
+from sklearn.linear_model import Lasso, LassoCV
 from sklearn.preprocessing import StandardScaler
+from joblib import Parallel, delayed
 from statsmodels.tsa.stattools import grangercausalitytests
 
 logger = logging.getLogger("feature_selection")
@@ -190,6 +191,34 @@ def identify_feature_columns(
         and c != target
         and not c.startswith(sbi_prefix)
     ])
+
+
+def identify_yearly_feature_columns(
+    feature_cols: list[str],
+    prefix: str = "y_",
+) -> list[str]:
+    """Identify features that originated from yearly CBS tables.
+
+    The gold layer prefixes all yearly-origin feature columns with ``y_``
+    during transformation (see ``transform_generic_feature_table`` with
+    ``lag_years > 0``).  This function simply filters on that prefix.
+
+    Parameters
+    ----------
+    feature_cols : list[str]
+        All feature column names (e.g. from ``identify_feature_columns()``).
+    prefix : str, default ``"y_"``
+        The prefix applied to yearly features by the gold layer.
+
+    Returns
+    -------
+    list[str]
+        Feature column names that start with ``prefix``.
+    """
+    yearly = [c for c in feature_cols if c.startswith(prefix)]
+    if yearly:
+        logger.info("identify_yearly: %d features with '%s' prefix", len(yearly), prefix)
+    return yearly
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -603,6 +632,7 @@ def apply_granger_filter(
     min_sector_fraction: float = 0.20,
     sector_col: str | None = None,
     difference: bool = True,
+    n_jobs: int = -1,
 ) -> dict[str, Any]:
     """Keep features that Granger-cause the target in enough sectors.
 
@@ -629,6 +659,8 @@ def apply_granger_filter(
     difference : bool, default True
         First-difference the data before testing (recommended for
         non-stationary panel data).
+    n_jobs : int, default -1
+        Number of parallel jobs.  -1 uses all available CPU cores.
 
     Returns
     -------
@@ -643,63 +675,21 @@ def apply_granger_filter(
             for sector, group in df.groupby(sector_col)
         ]
 
-    scores: dict[str, float] = {}
-    n_features = len(feature_list)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_granger_single_feature)(
+            feat, sector_groups, target, max_lag, p_threshold, difference,
+        )
+        for feat in feature_list
+    )
 
-    for feat_idx, feat in enumerate(feature_list):
-        if (feat_idx + 1) % 50 == 0 or feat_idx == 0:
-            logger.debug("granger                processing feature %d/%d",
-                         feat_idx + 1, n_features)
-        sector_results: list[bool] = []
-        n_skipped_gaps = 0
-        n_failed = 0
-        last_failure_reason = ""
-
-        for sector, group_sorted in sector_groups:
-            data = group_sorted[[target, feat]].dropna()
-
-            # Check temporal contiguity before differencing
-            full_time = group_sorted[TIME_COL]
-            positions = full_time.index.get_indexer(data.index)
-            gaps = np.diff(positions)
-            if len(positions) > 1 and (gaps > 1).any():
-                n_skipped_gaps += 1
-                continue
-
-            if difference:
-                data = data.diff().iloc[1:]
-
-            if len(data) < 3 * max_lag:
-                continue
-
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    test_out = grangercausalitytests(
-                        data[[target, feat]].values, maxlag=max_lag, verbose=False,
-                    )
-                min_p = min(
-                    test_out[lag][0]["ssr_ftest"][1]
-                    for lag in range(1, max_lag + 1)
-                )
-                sector_results.append(min_p < p_threshold)
-            except Exception as exc:
-                n_failed += 1
-                last_failure_reason = str(exc)
-                continue
-
-        if n_skipped_gaps > 0:
-            logger.debug("granger  %s: skipped %d/%d sectors (temporal gaps)",
-                         feat, n_skipped_gaps, len(sector_groups))
-        if n_failed > 0:
-            logger.debug("granger  %s: failed %d/%d sectors (%s)",
-                         feat, n_failed, len(sector_groups), last_failure_reason)
-
-        if sector_results:
-            frac = sum(sector_results) / len(sector_results)
-        else:
-            frac = 0.0
+    scores = {}
+    for feat, frac, n_tested, n_skipped, n_failed in results:
         scores[feat] = frac
+        if n_skipped > 0 or n_failed > 0:
+            logger.debug(
+                "granger  %s: tested=%d, skipped=%d (gaps), failed=%d  →  frac=%.2f",
+                feat, n_tested, n_skipped, n_failed, frac,
+            )
 
     retained = [f for f in feature_list if scores.get(f, 0.0) >= min_sector_fraction]
     dropped = [f for f in feature_list if scores.get(f, 0.0) < min_sector_fraction]
@@ -717,6 +707,68 @@ def apply_granger_filter(
                         feature_list, retained, dropped, scores)
 
 
+def _granger_single_feature(
+    feat: str,
+    sector_groups: list,
+    target: str,
+    max_lag: int,
+    p_threshold: float,
+    difference: bool,
+) -> tuple[str, float, int, int, int]:
+    """Run Granger causality for one feature across all sectors.
+
+    Called in parallel by ``apply_granger_filter``.
+
+    Returns
+    -------
+    tuple[str, float, int, int, int]
+        ``(feature_name, frac_significant, n_tested, n_skipped, n_failed)``
+    """
+    sector_results: list[bool] = []
+    n_skipped = 0
+    n_failed = 0
+
+    for sector, group_sorted in sector_groups:
+        data = group_sorted[[target, feat]].dropna()
+
+        # Check temporal contiguity
+        full_time = group_sorted[TIME_COL]
+        positions = full_time.index.get_indexer(data.index)
+        gaps = np.diff(positions)
+        if len(positions) > 1 and (gaps > 1).any():
+            n_skipped += 1
+            continue
+
+        if difference:
+            data = data.diff().iloc[1:]
+
+        if len(data) < 3 * max_lag:
+            n_skipped += 1
+            continue
+
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                test_out = grangercausalitytests(
+                    data[[target, feat]].values, maxlag=max_lag, verbose=False,
+                )
+            min_p = min(
+                test_out[lag][0]["ssr_ftest"][1]
+                for lag in range(1, max_lag + 1)
+            )
+            sector_results.append(min_p < p_threshold)
+        except Exception:
+            n_failed += 1
+            continue
+
+    if sector_results:
+        frac = sum(sector_results) / len(sector_results)
+    else:
+        frac = 0.0
+
+    return feat, frac, len(sector_results), n_skipped, n_failed
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FILTER 7 — LASSO STABILITY SELECTION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -730,6 +782,7 @@ def apply_lasso_stability_filter(
     random_state: int = 42,
     horizons: list[int] | None = None,
     sector_col: str | None = None,
+    n_jobs: int = -1,
 ) -> dict[str, Any]:
     """Keep features that Lasso selects consistently across bootstrap samples.
 
@@ -768,6 +821,9 @@ def apply_lasso_stability_filter(
     sector_col : str or None, default None
         Column identifying sectors.  Required when ``horizons`` is provided
         to shift the target within each sector correctly.
+    n_jobs : int, default -1
+        Number of parallel jobs for the bootstrap loop.  -1 uses all
+        available CPU cores.  1 disables parallelism.
 
     Returns
     -------
@@ -785,7 +841,7 @@ def apply_lasso_stability_filter(
         # ── Contemporaneous mode (original behaviour) ────────────────
         selection_prob = _lasso_bootstrap_loop(
             df[feature_list].values, df[target].values,
-            n_bootstraps, random_state,
+            n_bootstraps, random_state, n_jobs=n_jobs,
         )
 
         scores = {col: float(p) for col, p in zip(feature_list, selection_prob)}
@@ -818,7 +874,7 @@ def apply_lasso_stability_filter(
         horizon_seed = random_state + h * 10_000
 
         horizon_probs[h] = _lasso_bootstrap_loop(
-            X_h, y_h, n_bootstraps, horizon_seed,
+            X_h, y_h, n_bootstraps, horizon_seed, n_jobs=n_jobs,
         )
 
     # Final probability = max across horizons (pass at ANY horizon)
@@ -853,12 +909,14 @@ def _lasso_bootstrap_loop(
     y: np.ndarray,
     n_bootstraps: int,
     random_state: int,
+    n_jobs: int = -1,
 ) -> np.ndarray:
     """Run the core Lasso bootstrap loop and return selection probabilities.
 
-    Standardises features, runs ``n_bootstraps`` LassoCV fits on resampled
-    data, and returns the fraction of bootstraps where each feature received
-    a non-zero coefficient.
+    Fits ``LassoCV`` **once** on the full data to find the optimal
+    regularisation strength (``alpha``), then runs ``n_bootstraps`` plain
+    ``Lasso`` fits (with that fixed alpha) on resampled data in parallel.
+    This is ~45× faster than running ``LassoCV`` on every bootstrap.
 
     Parameters
     ----------
@@ -870,6 +928,9 @@ def _lasso_bootstrap_loop(
         Number of bootstrap iterations.
     random_state : int
         Base random seed.
+    n_jobs : int, default -1
+        Number of parallel jobs.  -1 uses all available CPU cores.
+        1 disables parallelism (useful for debugging).
 
     Returns
     -------
@@ -882,22 +943,43 @@ def _lasso_bootstrap_loop(
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
 
-    n_features = X.shape[1]
-    selection_counts = np.zeros(n_features)
+    # Step 1: find optimal alpha from full data (one LassoCV, ~500 internal fits)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        lasso_cv = LassoCV(cv=5, random_state=random_state, max_iter=10_000, tol=1e-4, n_jobs=-1)
+        lasso_cv.fit(X, y)
+    alpha = lasso_cv.alpha_
 
-    for i in range(n_bootstraps):
-        if (i + 1) % 10 == 0 or i == 0:
-            logger.debug("lasso_stability        bootstrap %d/%d", i + 1, n_bootstraps)
-        rng = np.random.RandomState(random_state + i)
-        idx = rng.choice(len(X), size=len(X), replace=True)
+    # Step 2: run bootstraps with fixed alpha (plain Lasso, 1 fit each)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_single_lasso_bootstrap)(X, y, alpha, random_state, i)
+        for i in range(n_bootstraps)
+    )
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            lasso = LassoCV(cv=5, random_state=random_state, max_iter=10_000, tol=1e-2)
-            lasso.fit(X[idx], y[idx])
-        selection_counts += np.abs(lasso.coef_) > 1e-10
-
+    selection_counts = np.sum(results, axis=0)
     return selection_counts / n_bootstraps
+
+
+def _single_lasso_bootstrap(
+    X: np.ndarray,
+    y: np.ndarray,
+    alpha: float,
+    random_state: int,
+    boot_idx: int,
+) -> np.ndarray:
+    """Fit one Lasso bootstrap with pre-computed alpha and return selection mask.
+
+    This function is called in parallel by ``_lasso_bootstrap_loop``.
+    """
+    rng = np.random.RandomState(random_state + boot_idx)
+    idx = rng.choice(len(X), size=len(X), replace=True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        lasso = Lasso(alpha=alpha, max_iter=10_000, tol=1e-3)
+        lasso.fit(X[idx], y[idx])
+
+    return (np.abs(lasso.coef_) > 1e-10).astype(np.float64)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1060,6 +1142,8 @@ def save_preset_to_json(
     input_shape: tuple[int, int] | list[int],
     description: str = "",
     ungrouped_survivors: list[str] | None = None,
+    filename: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> Path:
     """Serialise a feature selection preset to a JSON file.
 
@@ -1084,6 +1168,12 @@ def save_preset_to_json(
         Human-readable description of the preset strategy.
     ungrouped_survivors : list[str], optional
         Survivors not assigned to any group.
+    filename : str, optional
+        Exact output filename (e.g. ``"feature_catalog.json"``).  Defaults to
+        ``preset_{preset_name}.json`` for backward compatibility.
+    extra_metadata : dict, optional
+        Additional top-level keys merged into the artifact (never overrides
+        the standard keys).
 
     Returns
     -------
@@ -1118,11 +1208,319 @@ def save_preset_to_json(
         "filter_chain": chain_summary,
         "feature_groups": feature_groups,
     }
+    for key, value in (extra_metadata or {}).items():
+        artifact.setdefault(key, value)
 
-    path = output_dir / f"preset_{preset_name}.json"
+    path = output_dir / (filename if filename else f"preset_{preset_name}.json")
     with open(path, "w") as f:
         json.dump(artifact, f, indent=2, default=str)
 
     print(f"✅ Preset saved: {path}  ({len(survivors)} features, "
           f"{len(feature_groups)} groups)")
     return path
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# YEARLY FEATURE INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+def merge_yearly_features(
+    df_quarterly: pd.DataFrame,
+    df_yearly: pd.DataFrame,
+    yearly_feature_cols: list[str],
+    year_col: str = "year",
+    lag_years: int = 1,
+    sector_col: str | None = None,
+    yearly_sector_col: str | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Merge yearly CBS data into a quarterly panel with configurable lag.
+
+    Each yearly value is broadcast to all 4 quarters of the **lagged** year.
+    With ``lag_years=1`` (default), the 2022 yearly value appears in Q1–Q4
+    of 2023 — avoiding look-ahead bias because annual data is typically
+    published the following year.
+
+    Parameters
+    ----------
+    df_quarterly : pd.DataFrame
+        The quarterly panel dataset (must contain ``year_col``).
+    df_yearly : pd.DataFrame
+        The yearly CBS dataset.
+    yearly_feature_cols : list[str]
+        Column names in ``df_yearly`` to merge.
+    year_col : str, default ``"year"``
+        Year column present in both datasets.
+    lag_years : int, default 1
+        How many years to lag.  1 means "use last year's value for this
+        year's quarters."  0 means no lag (mild look-ahead bias).
+    sector_col : str or None
+        Sector column in ``df_quarterly`` (e.g. ``"sector"``).
+    yearly_sector_col : str or None
+        Sector column in ``df_yearly``.  If ``None`` but ``sector_col``
+        is provided, the yearly data is treated as national-level and
+        broadcast to all sectors.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, list[str]]
+        ``(merged_df, new_column_names)`` — the quarterly DataFrame with
+        yearly features added, and the list of new column names (suffixed
+        with ``_y`` if a name collision would occur).
+    """
+    df_y = df_yearly.copy()
+
+    # Apply lag: shift the year so yearly 2022 maps to quarterly 2023
+    df_y[year_col] = df_y[year_col] + lag_years
+
+    # Determine merge keys
+    merge_keys = [year_col]
+    if sector_col and yearly_sector_col:
+        df_y = df_y.rename(columns={yearly_sector_col: sector_col})
+        merge_keys.append(sector_col)
+
+    # Resolve column name collisions
+    existing_cols = set(df_quarterly.columns)
+    rename_map: dict[str, str] = {}
+    final_names: list[str] = []
+    for col in yearly_feature_cols:
+        new_name = col
+        if col in existing_cols:
+            new_name = f"{col}_yearly"
+            rename_map[col] = new_name
+        final_names.append(new_name)
+
+    if rename_map:
+        df_y = df_y.rename(columns=rename_map)
+
+    # Select only the columns we need for merging
+    merge_cols = merge_keys + final_names
+    df_y_slim = df_y[merge_cols].drop_duplicates()
+
+    # Merge
+    merged = df_quarterly.merge(df_y_slim, on=merge_keys, how="left")
+
+    n_matched = merged[final_names[0]].notna().sum() if final_names else 0
+    n_total = len(merged)
+    print(f"Yearly merge: {len(final_names)} features, "
+          f"lag={lag_years} year(s), "
+          f"{n_matched}/{n_total} rows matched "
+          f"({n_matched / n_total:.0%})")
+
+    return merged, final_names
+
+
+def evaluate_yearly_features(
+    yearly_feature_cols: list[str],
+    df: pd.DataFrame,
+    target: str,
+    year_col: str = "year",
+    sector_col: str | None = None,
+    corr_threshold: float = 0.10,
+    lag_threshold: float = 0.10,
+) -> dict[str, Any]:
+    """Evaluate yearly features at annual granularity.
+
+    Quarterly filters penalise yearly features because within-sector
+    differencing produces 75% zeros (the value only changes at Q1
+    boundaries).  This function evaluates yearly features fairly by
+    aggregating the quarterly target to annual means first.
+
+    Two tests are performed at annual resolution:
+
+    1. **Year-over-year differenced correlation** —
+       ``corr(Δfeature_year, Δtarget_year)`` within each sector,
+       aggregated across sectors using the median.
+    2. **One-year-ahead lagged correlation** —
+       ``corr(feature_year, target_{year+1})`` within each sector,
+       testing whether this year's feature predicts next year's
+       absenteeism.
+
+    A feature passes if **either** test exceeds its threshold.
+
+    Parameters
+    ----------
+    yearly_feature_cols : list[str]
+        Column names to evaluate.
+    df : pd.DataFrame
+        The quarterly panel with yearly features already merged in.
+    target : str
+        Target column name.
+    year_col : str, default ``"year"``
+        Year column for annual aggregation.
+    sector_col : str or None
+        Sector column for panel-aware computation.
+    corr_threshold : float, default 0.10
+        Minimum median |r| for the differenced correlation test.
+    lag_threshold : float, default 0.10
+        Minimum median |r| for the one-year-ahead lagged test.
+
+    Returns
+    -------
+    dict
+        Result dict (same format as other filters).
+        ``scores[feature]`` = dict with ``"diff_corr"`` and ``"lag_corr"``
+        keys, each containing the median |r| across sectors.
+    """
+    cols_needed = [year_col, target] + yearly_feature_cols
+    if sector_col:
+        cols_needed.append(sector_col)
+
+    # Aggregate quarterly target to annual means
+    group_keys = [year_col] if not sector_col else [sector_col, year_col]
+    df_annual = (
+        df[cols_needed]
+        .dropna(subset=yearly_feature_cols + [target], how="all")
+        .groupby(group_keys)
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+
+    if sector_col:
+        sector_groups = [
+            (s, g.sort_values(year_col))
+            for s, g in df_annual.groupby(sector_col)
+        ]
+    else:
+        sector_groups = [("__all__", df_annual.sort_values(year_col))]
+
+    scores: dict[str, dict[str, float]] = {}
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for feat in yearly_feature_cols:
+            # Test 1: year-over-year differenced correlation
+            diff_corrs: list[float] = []
+            for _, group in sector_groups:
+                diffed = group[[feat, target]].diff().iloc[1:]
+                valid = diffed[feat].notna() & diffed[target].notna()
+                if valid.sum() > 3:
+                    r = diffed.loc[valid, feat].corr(diffed.loc[valid, target])
+                    if not np.isnan(r):
+                        diff_corrs.append(abs(r))
+
+            # Test 2: one-year-ahead lagged correlation
+            lag_corrs: list[float] = []
+            for _, group in sector_groups:
+                future_target = group[target].shift(-1)
+                valid = group[feat].notna() & future_target.notna()
+                if valid.sum() > 3:
+                    r = group.loc[valid, feat].corr(future_target[valid])
+                    if not np.isnan(r):
+                        lag_corrs.append(abs(r))
+
+            diff_score = float(np.median(diff_corrs)) if diff_corrs else 0.0
+            lag_score = float(np.median(lag_corrs)) if lag_corrs else 0.0
+            scores[feat] = {"diff_corr": diff_score, "lag_corr": lag_score}
+
+    retained, dropped = [], []
+    for feat in yearly_feature_cols:
+        passes_diff = scores[feat]["diff_corr"] >= corr_threshold
+        passes_lag = scores[feat]["lag_corr"] >= lag_threshold
+        if passes_diff or passes_lag:
+            retained.append(feat)
+        else:
+            dropped.append(feat)
+
+    logger.info(
+        "yearly_evaluation      retained=%d  dropped=%d  "
+        "(corr_threshold=%.2f, lag_threshold=%.2f)",
+        len(retained), len(dropped), corr_threshold, lag_threshold,
+    )
+    return _make_result(
+        "yearly_evaluation",
+        {"corr_threshold": corr_threshold, "lag_threshold": lag_threshold,
+         "year_col": year_col, "sector_col": sector_col},
+        yearly_feature_cols, retained, dropped, scores,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PRESET MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+def deduplicate_presets(
+    preset_dir: str | Path,
+    pattern: str = "preset_*.json",
+    dry_run: bool = False,
+) -> dict[str, list[str]]:
+    """Compare preset JSON files and remove duplicates with identical feature sets.
+
+    Two presets are considered duplicates if they contain exactly the same
+    set of survivor feature names (order-independent).  When duplicates are
+    found, the preset whose name comes first alphabetically is kept and the
+    others are deleted.
+
+    Parameters
+    ----------
+    preset_dir : str or Path
+        Directory containing preset JSON files.
+    pattern : str, default ``"preset_*.json"``
+        Glob pattern for preset files.
+    dry_run : bool, default False
+        If True, report duplicates without deleting anything.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Maps each kept preset filename to a list of deleted duplicate
+        filenames.  Empty dict means no duplicates found.
+    """
+    preset_dir = Path(preset_dir)
+    preset_files = sorted(preset_dir.glob(pattern))
+
+    if not preset_files:
+        print(f"No preset files matching '{pattern}' in {preset_dir}")
+        return {}
+
+    # Load feature sets from each preset
+    presets: dict[str, frozenset[str]] = {}
+    for path in preset_files:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            # Extract survivor feature names
+            survivors = set()
+            if "survivors" in data:
+                survivors = set(data["survivors"])
+            elif "feature_groups" in data:
+                for group in data["feature_groups"].values():
+                    if isinstance(group, dict) and "columns" in group:
+                        survivors.update(group["columns"])
+                    elif isinstance(group, list):
+                        survivors.update(group)
+            presets[path.name] = frozenset(survivors)
+        except Exception as e:
+            print(f"  ⚠️ Could not read {path.name}: {e}")
+            continue
+
+    # Group by identical feature sets
+    seen: dict[frozenset[str], str] = {}  # feature_set → first preset name
+    duplicates: dict[str, list[str]] = {}  # kept_name → [deleted_names]
+
+    for name, features in presets.items():
+        if features in seen:
+            kept = seen[features]
+            duplicates.setdefault(kept, []).append(name)
+        else:
+            seen[features] = name
+
+    if not duplicates:
+        print(f"✅ No duplicates found among {len(presets)} presets.")
+        return {}
+
+    # Report and optionally delete
+    for kept, dupes in duplicates.items():
+        n_features = len(presets[kept])
+        print(f"\n  Kept:    {kept} ({n_features} features)")
+        for dupe in dupes:
+            if dry_run:
+                print(f"  Would delete: {dupe} (identical)")
+            else:
+                (preset_dir / dupe).unlink()
+                print(f"  🗑️ Deleted: {dupe} (identical to {kept})")
+
+    action = "would delete" if dry_run else "deleted"
+    total_dupes = sum(len(d) for d in duplicates.values())
+    remaining = len(presets) - total_dupes
+    print(f"\nSummary: {total_dupes} duplicates {action}, {remaining} unique presets remain.")
+
+    return duplicates
