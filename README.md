@@ -116,7 +116,7 @@ eaisi-uwv/
 ├── reports/                    # Exported figures + CSVs (--report); reports/comparison/ (--compare)
 ├── notebooks/                  # Non-production experimentation (reference, no-copy; _legacy/ = retired)
 │   ├── data_exploration/       # EDA and schema analysis
-│   └── ml_experimentation/     # Model experiments + cv_output parquets
+│   └── ml_experimentation/     # Model experiments + automated experiment scripts and output parquets
 ├── src/                        # Production source code
 │   ├── data_engineering/       # Medallion pipeline: data_loader_{raw,bronze,silver,gold}.py
 │   ├── ml_engineering/         # ML lifecycle — numbered 7-step pipeline + orchestrator + catalog
